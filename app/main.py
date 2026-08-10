@@ -2,8 +2,9 @@
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import admin, auth, exercises, fitness
@@ -57,6 +58,25 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.middleware("http")
+async def limit_upload_size(request: Request, call_next):
+    """在请求进入业务前按 Content-Length 快速拦截超大请求体。
+
+    上传接口还会在读取时做二次校验（Content-Length 可被伪造/分块传输），
+    这里主要是尽早拒绝、避免无谓缓冲。
+    """
+    if request.url.path.startswith("/api/fitness/assess"):
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit():
+            if int(content_length) > settings.upload_max_bytes:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "上传文件过大"},
+                )
+    return await call_next(request)
+
 
 # API 路由
 app.include_router(auth.router)
