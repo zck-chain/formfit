@@ -1,0 +1,68 @@
+{% extends "admin/base.html" %}
+{% from "admin/base.html" import icon %}
+{% block title %}用户管理 · FormFit{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{{ icon('users') }} 用户管理</h1>
+    <div class="page-sub">查看、检索用户并管理账号状态</div>
+  </div>
+  <form method="get" action="/admin/users" class="form-inline">
+    <input type="text" name="q" value="{{ q }}" placeholder="按邮箱搜索…" style="width:260px;">
+    <button class="btn" type="submit">{{ icon('search') }} 搜索</button>
+    {% if q %}<a class="btn" href="/admin/users">清除</a>{% endif %}
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <div class="panel-title">用户列表 <span class="hint">共 {{ rows|length }} 条</span></div>
+  </div>
+  <div class="panel-body">
+    <table>
+      <thead>
+        <tr>
+          <th class="num">ID</th><th>邮箱</th><th>昵称</th><th>会员</th><th>状态</th>
+          <th class="num">注册时间</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        {% set u = row.user %}
+        <tr>
+          <td class="num mono" style="color:var(--fg-muted);">{{ u.id }}</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div class="avatar" style="width:22px;height:22px;font-size:10px;">{{ (u.nickname or u.email)[0]|upper }}</div>
+              {{ u.email }}
+            </div>
+          </td>
+          <td>{{ u.nickname or '—' }}</td>
+          <td>
+            {% if row.membership and row.membership.is_active %}
+            <span class="tag tag-pro">{{ icon('crown') }} PRO</span>
+            {% else %}<span class="tag tag-free">免费</span>{% endif %}
+          </td>
+          <td>
+            {% if u.is_active %}<span class="tag tag-ok">{{ icon('check') }} 正常</span>
+            {% else %}<span class="tag tag-warn">{{ icon('stop') }} 已停用</span>{% endif %}
+          </td>
+          <td class="num mono">{{ u.created_at.strftime('%Y-%m-%d') if u.created_at else '—' }}</td>
+          <td class="row-actions">
+            {% if u.role != 'admin' %}
+            <form method="post" action="/admin/users/{{ u.id }}/toggle">
+              <button class="btn btn-sm {{ 'btn-danger' if u.is_active else '' }}" type="submit">
+                {% if u.is_active %}{{ icon('stop') }} 停用{% else %}{{ icon('check') }} 启用{% endif %}
+              </button>
+            </form>
+            {% else %}<span class="tag tag-free">管理员</span>{% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty">{{ icon('search') }} 没有匹配的用户</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

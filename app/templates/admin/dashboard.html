@@ -1,0 +1,125 @@
+{% extends "admin/base.html" %}
+{% from "admin/base.html" import icon %}
+{% block title %}数据看板 · FormFit{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1 class="page-title">数据看板 <span class="sub">实时</span></h1>
+    <div class="page-sub">用户增长、会员转化与核心使用数据</div>
+  </div>
+  <div class="muted mono" style="font-size:12px; text-align:right;">
+    动作库 <strong>{{ "{:,}".format(k.total_exercises) }}</strong> 个<br>
+    自定义 {{ k.custom_exercises }} 个
+  </div>
+</div>
+
+<!-- KPI：顶部色条区分类型，GitHub 风格大数字 -->
+<div class="kpi-grid">
+  <div class="kpi k-accent">
+    <div class="kpi-label">{{ icon('users') }} 注册用户</div>
+    <div class="kpi-value">{{ "{:,}".format(k.total_users) }}</div>
+    <div class="kpi-delta up">{{ icon('graph') }} 近 7 天 +{{ k.new_users_7 }}</div>
+  </div>
+  <div class="kpi k-success">
+    <div class="kpi-label">{{ icon('crown') }} 付费会员</div>
+    <div class="kpi-value">{{ "{:,}".format(k.pro_users) }}</div>
+    <div class="kpi-delta">转化率 {{ k.conversion_rate }}%</div>
+  </div>
+  <div class="kpi k-done">
+    <div class="kpi-label">{{ icon('inbox') }} 生成计划</div>
+    <div class="kpi-value">{{ "{:,}".format(k.total_plans) }}</div>
+    <div class="kpi-delta">人均 {{ "%.1f"|format(k.total_plans / k.total_users if k.total_users else 0) }} 份</div>
+  </div>
+  <div class="kpi k-attention">
+    <div class="kpi-label">{{ icon('image') }} 体态评估</div>
+    <div class="kpi-value">{{ "{:,}".format(k.total_assessments) }}</div>
+    <div class="kpi-delta">人均 {{ "%.1f"|format(k.total_assessments / k.total_users if k.total_users else 0) }} 次</div>
+  </div>
+  <div class="kpi k-danger">
+    <div class="kpi-label">{{ icon('pulse') }} 训练记录</div>
+    <div class="kpi-value">{{ "{:,}".format(k.total_logs) }}</div>
+    <div class="kpi-delta">人均 {{ "%.1f"|format(k.total_logs / k.total_users if k.total_users else 0) }} 次</div>
+  </div>
+</div>
+
+<div style="display:grid; grid-template-columns: 1.5fr 1fr; gap:16px; align-items:start;">
+  <div class="panel">
+    <div class="panel-head">
+      <div class="panel-title">{{ icon('graph') }} 近 14 天新增注册 <span class="hint">每根柱代表一天</span></div>
+    </div>
+    <div class="panel-body padded">
+      <div class="spark">
+        {% set max_d = daily | map(attribute='count') | max %}
+        {% for d in daily %}
+        <div class="bar {{ 'today' if loop.last else '' }}"
+             style="height:{{ ((d.count / max_d * 100) if max_d else 4) }}%"
+             title="{{ d.date }}：{{ d.count }} 人"></div>
+        {% endfor %}
+      </div>
+      <div class="spark-axis">
+        <span>{{ daily[0].date if daily else '' }}</span>
+        <span>今日</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><div class="panel-title">{{ icon('dashboard') }} 评估方向分布</div></div>
+    <div class="panel-body">
+      <table>
+        <tbody>
+          {% for d in directions %}
+          <tr>
+            <td>
+              {% if d.direction == 'gain' %}<span class="tag tag-gain">增肌</span>
+              {% elif d.direction == 'fat_loss' %}<span class="tag tag-fat">减脂</span>
+              {% elif d.direction == 'rehab' %}<span class="tag tag-rehab">康复</span>
+              {% else %}<span class="tag tag-free">维持</span>{% endif %}
+            </td>
+            <td class="num mono">{{ d.count }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="2" class="empty">{{ icon('search') }} 暂无评估数据</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <div class="panel-title">{{ icon('clock') }} 最近注册用户</div>
+    <a class="btn btn-sm" href="/admin/users">查看全部</a>
+  </div>
+  <div class="panel-body">
+    <table>
+      <thead>
+        <tr><th>邮箱</th><th>昵称</th><th>会员</th><th class="num">注册时间</th></tr>
+      </thead>
+      <tbody>
+        {% for u in recent_users %}
+        <tr>
+          <td>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div class="avatar" style="width:22px;height:22px;font-size:10px;">{{ (u.nickname or u.email)[0]|upper }}</div>
+              {{ u.email }}
+            </div>
+          </td>
+          <td>{{ u.nickname or '—' }}</td>
+          <td>
+            {% if u.membership and u.membership.is_active %}
+            <span class="tag tag-pro">{{ icon('crown') }} PRO</span>
+            {% else %}<span class="tag tag-free">免费</span>{% endif %}
+          </td>
+          <td class="num mono">{{ u.created_at.strftime('%Y-%m-%d %H:%M') if u.created_at else '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="empty">{{ icon('inbox') }} 还没有用户注册</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,48 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ===== 环境变量与密钥 =====
+.env
+
+# ===== 数据库 =====
+*.db
+*.sqlite3
+formfit.db
+
+# ===== 用户上传（涉隐私、体积大）=====
+app/static/uploads/*
+!app/static/uploads/.gitkeep
+
+# ===== 数据集自身的上游 git 备份（不纳入主仓库）=====
+exercises-dataset/.git.upstream-backup/
+
+# ===== Flutter / Dart =====
+formfit_app/.dart_tool/
+formfit_app/.flutter-plugins
+formfit_app/.flutter-plugins-dependencies
+formfit_app/.packages
+formfit_app/.pub-cache/
+formfit_app/build/
+formfit_app/.pub/
+formfit_app/ios/Pods/
+formfit_app/ios/.symlinks/
+formfit_app/ios/Flutter/Flutter.framework
+formfit_app/ios/Flutter/Flutter.podspec
+formfit_app/android/.gradle/
+formfit_app/android/local.properties
+formfit_app/**/GeneratedPluginRegistrant.*
+
+# ===== IDE / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# ===== 日志 =====
+*.log
+logs/

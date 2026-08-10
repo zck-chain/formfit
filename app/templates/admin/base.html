@@ -1,0 +1,88 @@
+{% macro icon(name, size=16) -%}
+{% set paths = {
+  'logo': '<path d="M12 .5C5.73.5.5 5.73.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.68.8.56C20.21 21.39 23.5 17.08 23.5 12 23.5 5.73 18.27.5 12 .5z"/>',
+  'dashboard': '<path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h3A1.5 1.5 0 0 1 8 3.5v3A1.5 1.5 0 0 1 6.5 8h-3A1.5 1.5 0 0 1 2 6.5v-3zM2 13.5A1.5 1.5 0 0 1 3.5 12h3a1.5 1.5 0 0 1 1.5 1.5v3A1.5 1.5 0 0 1 6.5 18h-3A1.5 1.5 0 0 1 2 16.5v-3zM11 3.5A1.5 1.5 0 0 1 12.5 2h3A1.5 1.5 0 0 1 17 3.5v3A1.5 1.5 0 0 1 15.5 8h-3A1.5 1.5 0 0 1 11 6.5v-3zM11 13.5a1.5 1.5 0 0 1 1.5-1.5h7a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 11 18.5v-5z"/>',
+  'users': '<path d="M3.5 8a3.5 3.5 0 1 1 7 0 3.5 3.5 0 0 1-7 0zM14 5a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM2.34 14.53A5.5 5.5 0 0 1 10.2 15a5.5 5.5 0 0 1 .17 2H1.5a.5.5 0 0 1-.5-.5v-.47c0-.62.29-1.19.78-1.56l.56-.44zM12 15.5a4.5 4.5 0 0 1 3.83-4.45 4.5 4.5 0 0 1 3.67 4.48v.97h-7.5v-1z"/>',
+  'card': '<path d="M1.75 3A1.75 1.75 0 0 0 0 4.75v8.5C0 14.22.78 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H1.75zM1.5 4.75a.25.25 0 0 1 .25-.25h12.5a.25.25 0 0 1 .25.25V6H1.5V4.75zM14.5 7.5v5.75a.25.25 0 0 1-.25.25H1.75a.25.25 0 0 1-.25-.25V7.5h13z"/>',
+  'dumbbell': '<path d="M2 8a1 1 0 0 1 1-1h1V5a1 1 0 1 1 2 0v1h2V5a1 1 0 1 1 2 0v1h1a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-1v1a1 1 0 1 1-2 0v-1H6v1a1 1 0 1 1-2 0v-1H3a1 1 0 0 1-1-1V8z"/>',
+  'search': '<path d="M10.5 1a9.5 9.5 0 1 0 5.74 17.08l4.34 4.34a.75.75 0 1 0 1.06-1.06l-4.34-4.34A9.5 9.5 0 0 0 10.5 1zM1.5 10.5a9 9 0 1 1 18 0 9 9 0 0 1-18 0z"/>',
+  'signout': '<path d="M3 3.25C3 2.01 4 1 5.25 1h5.5C12 1 13 2 13 3.25v3.5a.75.75 0 0 1-1.5 0v-3.5a.25.25 0 0 0-.25-.25h-5.5a.25.25 0 0 0-.25.25v13.5c0 .14.11.25.25.25h5.5c.14 0 .25-.11.25-.25v-3.5a.75.75 0 0 1 1.5 0v3.5C13 18 12 19 10.75 19h-5.5C4 19 3 18 3 16.75V3.25zM15.44 8.29a.75.75 0 0 1 1.06 0l2.5 2.5a.75.75 0 0 1 0 1.06l-2.5 2.5a.75.75 0 1 1-1.06-1.06l1.22-1.22H9a.75.75 0 0 1 0-1.5h7.66l-1.22-1.22a.75.75 0 0 1 0-1.06z"/>',
+  'check': '<path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0z"/>',
+  'stop': '<path d="M6 3h9a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z"/>',
+  'pulse': '<path d="M5 9.5h3l1.5-4 3 9L14 9.5h4"/>',
+  'gear': '<path d="M8 3.73v.57a6.5 6.5 0 0 0-.98.57l-.41-.41a.75.75 0 0 0-1.06 1.06l.41.41c-.25.3-.47.63-.65.98h-.56A.75.75 0 0 0 4 7.66v2.69c0 .41.34.75.75.75h.57c.18.35.4.68.65.98l-.41.41a.75.75 0 0 0 1.06 1.06l.41-.41c.3.2.64.42.98.57v.57c0 .41.34.75.75.75h2.5c.41 0 .75-.34.75-.75v-.57c.35-.15.68-.37.98-.65l.41.41a.75.75 0 0 0 1.06-1.06l-.41-.41c.2-.3.42-.64.57-.98h.57c.41 0 .75-.34.75-.75V7.66a.75.75 0 0 0-.75-.75h-.57a6.5 6.5 0 0 0-.65-.98l.41-.41a.75.75 0 1 0-1.06-1.06l-.41.41a6.5 6.5 0 0 0-.98-.57v-.57A.75.75 0 0 0 11.25 3h-2.5A.75.75 0 0 0 8 3.73zM9.5 11.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5z"/>',
+  'graph': '<path d="M1.5 1.75V13.5H16a.5.5 0 0 1 0 1H1a1 1 0 0 1-1-1V1.75a.75.75 0 0 1 1.5 0zM15.78 4.72a.75.75 0 0 1 0 1.06l-4.5 4.5a.75.75 0 0 1-1.06 0L8 8.06l-3.22 3.22a.75.75 0 1 1-1.06-1.06l3.75-3.75a.75.75 0 0 1 1.06 0l2.22 2.22 3.97-3.97a.75.75 0 0 1 1.06 0z"/>',
+  'inbox': '<path d="M2.5 4A1.5 1.5 0 0 1 4 2.5h8A1.5 1.5 0 0 1 13.5 4v6H9.81a.75.75 0 0 0-.67.42l-.65 1.27a.25.25 0 0 1-.22.14H5.73a.25.25 0 0 1-.22-.14l-.65-1.27a.75.75 0 0 0-.67-.42H2.5V4zM1 11.5V4a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3v7.5A1.5 1.5 0 0 1 13.5 13h-11A1.5 1.5 0 0 1 1 11.5z"/>',
+  'clock': '<path d="M8 .5a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15zM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8zm8-4a.75.75 0 0 1 .75.75v2.69l1.78 1.78a.75.75 0 1 1-1.06 1.06l-2-2A.75.75 0 0 1 7.25 7V4.75A.75.75 0 0 1 8 4z"/>',
+  'crown': '<path d="M1.75 3.5a.75.75 0 0 1 .73.93L2 5.5v.5l2.5 1.5L6 4.2a.75.75 0 0 1 1.4-.14L9.5 7.5 12 5.5v-.5l-.48-1.07a.75.75 0 1 1 1.43-.64l.8 1.78v7.18a1 1 0 0 1-1 1H3.25a1 1 0 0 1-1-1V5.07l.8-1.78a.75.75 0 0 1 .7-.79zM4 13.25h8v-1H4v1z"/>',
+  'image': '<path d="M2 3.75C2 2.78 2.78 2 3.75 2h8.5C13.22 2 14 2.78 14 3.75v8.5c0 .97-.78 1.75-1.75 1.75h-8.5A1.75 1.75 0 0 1 2 12.25v-8.5zm1.5 0v8.5c0 .14.11.25.25.25h8.5a.25.25 0 0 0 .25-.25V3.75a.25.25 0 0 0-.25-.25h-8.5a.25.25 0 0 0-.25.25zm2 2.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>'
+} %}
+<svg class="octicon octicon-{{ name }}" viewBox="0 0 {{ 16 if name != 'logo' else 24 }} {{ 16 if name != 'logo' else 24 }}" width="{{ size }}" height="{{ size }}" aria-hidden="true">
+  {{ paths[name] | safe }}
+</svg>
+{%- endmacro %}
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}FormFit 控制台{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+  <header class="header">
+    <a href="/admin" class="header-brand">
+      <span class="logo">{{ icon('dumbbell', 16) }}</span>
+      <span class="name">FormFit<span class="sep">/</span><span class="scope">console</span></span>
+    </a>
+    <div class="header-search">
+      <form method="get" action="/admin/users" id="global-search-form">
+        <input type="text" name="q" placeholder="搜索用户邮箱…" aria-label="搜索">
+      </form>
+    </div>
+    <div class="header-right">
+      {% if admin %}
+      <div class="header-user">
+        <div class="avatar">{{ (admin.nickname or admin.email)[0]|upper }}</div>
+        <span>{{ admin.nickname or admin.email.split('@')[0] }}</span>
+      </div>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if admin %}
+  <div class="layout">
+    <nav class="sidenav">
+      <div class="sidenav-title">概览</div>
+      <a href="/admin" class="{{ 'active' if active == 'dashboard' else '' }}">
+        {{ icon('dashboard') }} 数据看板
+      </a>
+
+      <div class="sidenav-title">运营</div>
+      <a href="/admin/users" class="{{ 'active' if active == 'users' else '' }}">
+        {{ icon('users') }} 用户管理
+        <span class="counter" style="margin-left:auto">{{ user_count if user_count is defined else '' }}</span>
+      </a>
+      <a href="/admin/membership" class="{{ 'active' if active == 'membership' else '' }}">
+        {{ icon('card') }} 订阅与支付
+      </a>
+      <a href="/admin/exercises" class="{{ 'active' if active == 'exercises' else '' }}">
+        {{ icon('dumbbell') }} 动作库
+      </a>
+
+      <div class="sidenav-sep"></div>
+      <form class="logout-form" method="post" action="/admin/logout">
+        <button type="submit" class="btn-logout">{{ icon('signout') }} 退出登录</button>
+      </form>
+    </nav>
+
+    <main class="main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {% else %}
+    {% block anon %}{% endblock %}
+  {% endif %}
+</body>
+</html>

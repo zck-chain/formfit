@@ -1,0 +1,71 @@
+{% extends "admin/base.html" %}
+{% from "admin/base.html" import icon %}
+{% block title %}{{ ex.name }} · 动作库{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <a href="/admin/exercises" style="font-size:12px; display:inline-flex; align-items:center; gap:4px; margin-bottom:6px;">
+      ← 返回动作库
+    </a>
+    <h1 class="page-title">{{ ex.name }}</h1>
+    <div class="page-sub">
+      <span class="tag tag-free">{{ ex.category_zh }}</span>
+      <span class="tag tag-pro">{{ ex.target_zh }}</span>
+      <span class="tag tag-free">{{ ex.equipment_zh }}</span>
+    </div>
+  </div>
+  <div class="muted mono" style="font-size:12px;">ID {{ ex.id }}</div>
+</div>
+
+<div style="display:grid; grid-template-columns: 320px 1fr; gap:20px; align-items:start;">
+  <!-- 动图展示（ex 来自检索服务，gif_url/image 已是完整 /media 路径） -->
+  <div class="panel" style="overflow:hidden;">
+    <div style="background:var(--canvas-subtle); aspect-ratio:1; display:grid; place-items:center;">
+      <img src="{{ ex.gif_url }}" alt="{{ ex.name }}"
+           style="width:100%; height:100%; object-fit:contain;">
+    </div>
+    <div class="panel-body padded" style="display:flex; gap:8px;">
+      <a class="btn btn-sm" href="{{ ex.image }}" target="_blank">{{ icon('image') }} 查看静态图</a>
+      <a class="btn btn-sm" href="{{ ex.gif_url }}" target="_blank">在新标签打开 GIF</a>
+    </div>
+  </div>
+
+  <!-- 详情信息 -->
+  <div>
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">{{ icon('dumbbell') }} 动作信息</div></div>
+      <div class="panel-body">
+        <table>
+          <tr><th style="width:110px;">主目标肌</th><td>{{ ex.target_zh }} <span class="muted mono">({{ ex.target }})</span></td></tr>
+          <tr><th>身体部位</th><td>{{ ex.category_zh }}</td></tr>
+          <tr><th>所需器械</th><td>{{ ex.equipment_zh }}</td></tr>
+          <tr>
+            <th>辅助肌群</th>
+            <td>
+              {% if ex.secondary_muscles %}
+                {% for m in ex.secondary_muscles %}<span class="tag tag-free" style="margin:2px 4px 2px 0;">{{ m }}</span>{% endfor %}
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">{{ icon('check') }} 动作步骤（中文）</div></div>
+      <div class="panel-body padded">
+        {% if ex.steps_zh %}
+        <ol style="padding-left:20px;">
+          {% for step in ex.steps_zh %}
+          <li style="margin-bottom:8px; line-height:1.6;">{{ step }}</li>
+          {% endfor %}
+        </ol>
+        {% else %}
+        <p class="muted">暂无中文步骤说明。</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,6 @@
+exercises-dataset/videos/*.gif filter=lfs diff=lfs merge=lfs -text
+exercises-dataset/images/*.jpg filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text
+*.tar.gz filter=lfs diff=lfs merge=lfs -text
+exercises-dataset/data/*.json filter=lfs diff=lfs merge=lfs -text
+exercises-dataset/index.html filter=lfs diff=lfs merge=lfs -text

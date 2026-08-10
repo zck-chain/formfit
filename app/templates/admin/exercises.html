@@ -1,0 +1,51 @@
+{% extends "admin/base.html" %}
+{% from "admin/base.html" import icon %}
+{% block title %}动作库 · FormFit{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{{ icon('dumbbell') }} 动作库</h1>
+    <div class="page-sub">浏览 1324 个数据集动作</div>
+  </div>
+  <form method="get" action="/admin/exercises" class="form-inline">
+    <input type="text" name="q" value="{{ q }}" placeholder="按名称搜索…" style="width:200px;">
+    <button class="btn" type="submit">{{ icon('search') }} 筛选</button>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <form method="get" action="/admin/exercises" class="form-inline">
+      <select name="category" onchange="this.form.submit()">
+        <option value="">全部部位</option>
+        {% for c in facets.categories %}
+        <option value="{{ c.value }}" {{ 'selected' if selected_cat == c.value }}>{{ c.label_zh }}</option>
+        {% endfor %}
+      </select>
+      <select name="equipment" onchange="this.form.submit()">
+        <option value="">全部器械</option>
+        {% for e in facets.equipment %}
+        <option value="{{ e.value }}" {{ 'selected' if selected_eq == e.value }}>{{ e.label_zh }}</option>
+        {% endfor %}
+      </select>
+      <input type="hidden" name="q" value="{{ q }}">
+      <a class="btn" href="/admin/exercises">重置</a>
+    </form>
+    <div class="panel-title hint" style="font-weight:400;">显示 {{ exercises|length }} 个</div>
+  </div>
+  <div class="ex-grid">
+    {% for ex in exercises %}
+    <a class="ex-card" href="/admin/exercises/{{ ex.id }}" title="{{ ex.name }}">
+      <img loading="lazy" src="{{ ex.gif_url | media_url }}" alt="{{ ex.name }}">
+      <div class="ex-name">{{ ex.name }}</div>
+      <div class="ex-meta">
+        {{ target_zh(ex.target) }} · {{ equip_zh(ex.equipment) }}
+        {% if ex.is_custom %} · 自定义{% endif %}
+      </div>
+    </a>
+    {% else %}
+    <div class="empty" style="grid-column:1/-1;">{{ icon('search') }} 没有匹配的动作</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
