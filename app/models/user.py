@@ -83,9 +83,14 @@ class Membership(Base):
     start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    # 支付预留
+    # 支付预留（order_id 存订单号 order_no）
     order_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     payment_channel: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
+    # 渠道侧订阅/交易原始 ID：用于 IAP 恢复购买（如 Apple original_transaction_id）
+    provider_subscription_id: Mapped[str | None] = mapped_column(
+        String(191), nullable=True, unique=True
+    )
 
     user: Mapped["User"] = relationship(back_populates="membership")
 

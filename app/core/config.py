@@ -47,6 +47,33 @@ class Settings(BaseSettings):
     app_name: str = "FormFit"
     upload_dir: Path = UPLOAD_DIR
 
+    # ---- 支付 ----
+    # 启用的渠道，逗号分隔：sandbox,apple,alipay,wechat（首发渠道待产品确认）
+    payment_channels: str = "sandbox"
+    payment_callback_base_url: str = "http://127.0.0.1:8000"
+
+    # 沙箱渠道（本地/联调，无需真实密钥）
+    sandbox_secret: str = "sandbox-dev-secret"
+
+    # Apple App Store Server IAP（服务端凭证校验）
+    # 共享密钥（App-Specific Shared Secret），用于 verifyReceipt
+    apple_shared_secret: str = ""
+    # 固定回传的 bundle_id，防跨 App 伪造；留空则不校验
+    apple_bundle_id: str = ""
+    # true 使用 https://buy.itunes.apple.com（生产），false 使用沙箱 sandbox
+    apple_production: bool = False
+
+    # 支付宝（预留，首发渠道确认后启用）
+    alipay_app_id: str = ""
+    alipay_private_key: str = ""
+    alipay_public_key: str = ""
+    alipay_callback_url: str = ""
+
+    # 微信支付（预留）
+    wechat_app_id: str = ""
+    wechat_mch_id: str = ""
+    wechat_api_v3_key: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
