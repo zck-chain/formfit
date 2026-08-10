@@ -2,21 +2,31 @@
 {% block title %}登录 · FormFit{% endblock %}
 {% block anon %}
 <div class="login-wrap">
-  <div class="login-card">
-    <div class="header-brand">{{ icon('dumbbell', 20) }} FormFit</div>
-    <div class="brand-sub">Operations Console</div>
-    {% if error %}<div class="login-error">{{ icon('stop') }} {{ error }}</div>{% endif %}
+  <div class="glow-cyan"></div>
+  <div class="login-card cut">
+    <span class="hud-corner tl"></span>
+    <span class="hud-corner tr"></span>
+    <span class="hud-corner bl"></span>
+    <span class="hud-corner br"></span>
+    <div class="header-brand">
+      <span class="logo cut-sm">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.09 12.97L11 13L10 22L19.91 11.03L13 11L14 2Z"/></svg>
+      </span>
+      FormFit
+    </div>
+    <div class="brand-sub">AI 健身控制台</div>
+    {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
     <form method="post" action="/admin/login">
       <div class="field">
         <label for="email">管理员邮箱</label>
         <input id="email" name="email" type="email" required autofocus
-               value="{{ 'admin@formfit.local' if not error else '' }}" placeholder="admin@example.com">
+               value="{{ 'admin@formfit.local' if not error else '' }}">
       </div>
       <div class="field">
         <label for="password">密码</label>
-        <input id="password" name="password" type="password" required placeholder="••••••••">
+        <input id="password" name="password" type="password" required>
       </div>
-      <button class="btn btn-primary btn-block" type="submit">{{ icon('check') }} 进入控制台</button>
+      <button class="btn btn-primary btn-block" type="submit" style="margin-top:8px; padding:12px;">进入控制台</button>
     </form>
   </div>
 </div>

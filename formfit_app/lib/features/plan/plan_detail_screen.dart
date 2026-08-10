@@ -15,8 +15,12 @@ class PlanDayScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final planAsync = ref.watch(activePlanProvider);
+    final days = planAsync.value?.content.days;
+    final dayLabel = days != null && dayIndex >= 0 && dayIndex < days.length
+        ? days[dayIndex].dayLabel
+        : '训练日';
     return Scaffold(
-      appBar: AppBar(title: Text(planAsync.value?.content.days[dayIndex].dayLabel ?? '训练日')),
+      appBar: AppBar(title: Text(dayLabel)),
       body: planAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(child: Text('加载失败：$e')),
@@ -24,19 +28,28 @@ class PlanDayScreen extends ConsumerWidget {
           if (plan == null) {
             return const Center(child: Text('暂无计划'));
           }
-          final day = plan.content.days[dayIndex];
+          final days = plan.content.days;
+          if (dayIndex < 0 || dayIndex >= days.length) {
+            return const Center(child: Text('该训练日不存在'));
+          }
+          final day = days[dayIndex];
           return Column(
             children: [
               Expanded(
-                child: ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: day.items.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (_, i) => _ExerciseTile(
-                    index: i,
-                    item: day.items[i],
-                  ),
-                ),
+                child: day.items.isEmpty
+                    ? const Center(
+                        child: Text('这一天还没有安排动作',
+                            style:
+                                TextStyle(color: AppColors.textSecondary)))
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: day.items.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 10),
+                        itemBuilder: (_, i) => _ExerciseTile(
+                          index: i,
+                          item: day.items[i],
+                        ),
+                      ),
               ),
               _startBar(context, day),
             ],
@@ -47,6 +60,7 @@ class PlanDayScreen extends ConsumerWidget {
   }
 
   Widget _startBar(BuildContext context, PlanDay day) {
+    final canStart = day.items.isNotEmpty;
     return SafeArea(
       child: Container(
         padding: const EdgeInsets.all(16),
@@ -55,9 +69,9 @@ class PlanDayScreen extends ConsumerWidget {
           border: const Border(top: BorderSide(color: Color(0xFFEDEFF2))),
         ),
         child: ElevatedButton.icon(
-          onPressed: () => context.push('/workout/$dayIndex'),
+          onPressed: canStart ? () => context.push('/workout/$dayIndex') : null,
           icon: const Icon(Icons.play_arrow_rounded, color: Colors.black, size: 22),
-          label: Text('开始训练 · ${day.items.length} 个动作',
+          label: Text(canStart ? '开始训练 · ${day.items.length} 个动作' : '暂无可训练动作',
               style: const TextStyle(color: Colors.black)),
         ),
       ),

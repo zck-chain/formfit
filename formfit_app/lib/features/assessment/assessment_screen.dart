@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../api/repository.dart';
@@ -310,9 +311,15 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () => Navigator.of(context).pop(r),
+              onPressed: () {
+                // 评估完成后进入计划页生成专属计划。
+                // 注：generatePlan 基于服务端档案编排，不直接接收本次评估结果，
+                // 评估方向用于用户参考；如需把评估结果纳入生成，属后端契约变更。
+                Navigator.of(context).pop();
+                context.push('/plan');
+              },
               icon: const Icon(Icons.assignment_add, color: Colors.black),
-              label: const Text('用这个结果生成计划',
+              label: const Text('去生成训练计划',
                   style: TextStyle(color: Colors.black)),
             ),
           ),
