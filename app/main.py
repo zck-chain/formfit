@@ -84,6 +84,13 @@ app.include_router(exercises.router)
 app.include_router(fitness.router)
 app.include_router(admin.router)
 
+# 兼容旧路径：历史数据里可能存了 /static/exercises/...，统一重定向到 /media/exercises/...
+@app.get("/static/exercises/{rest:path}", include_in_schema=False)
+async def _legacy_media_redirect(rest: str):
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=f"/media/exercises/{rest}", status_code=308)
+
+
 # 静态资源：后台 CSS/JS，以及用户上传（位于 app/static 下）
 _STATIC_DIR = BASE_DIR / "app" / "static"
 app.mount(
