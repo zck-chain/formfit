@@ -54,9 +54,9 @@ class FormFitApp extends ConsumerWidget {
 
     return MaterialApp.router(
       title: 'FormFit',
-      theme: AppTheme.light,
+      theme: AppTheme.dark,
       darkTheme: AppTheme.dark,
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.dark,
       debugShowCheckedModeBanner: false,
       routerConfig: _router,
     );
