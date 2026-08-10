@@ -21,13 +21,41 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# App / 后台跨域（开发期放开；生产应收紧）
+
+def _build_cors_origins() -> list[str]:
+    """根据配置决定 CORS 允许来源。
+
+    - 生产：必须显式白名单，不允许 "*"（validate_production 已在启动时把关）。
+    - 开发：未配置时回退到 "*"，但此时必须关闭 credentials，
+      避免浏览器规范禁止的 "*" + credentials 组合。
+    """
+    origins = settings.cors_origin_list
+    if origins:
+        # 显式白名单：任何环境都安全（含 credentials）
+        return origins
+    if settings.is_production:
+        # 生产缺白名单不应到这里——validate_production 会先拒绝启动；
+        # 兜底返回空列表，拒绝所有跨域。
+        logger.error("生产环境未配置 cors_origins，CORS 已禁用")
+        return []
+    # 开发环境且未配置：放开来源，但强制关闭 credentials。
+    return ["*"]
+
+
+_cors_origins = _build_cors_origins()
+# credentials 仅在有显式白名单（非空、非通配）时才有意义；
+# "*" 或空白名单都必须关闭，杜绝 *+credentials，也避免空配置带凭证。
+_effective_credentials = bool(
+    settings.cors_allow_credentials and _cors_origins and "*" not in _cors_origins
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    # "*" 与 credentials 不能同时为 True（浏览器会拒绝，也是 WS-2 指出的风险）。
+    allow_credentials=_effective_credentials,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # API 路由
@@ -63,6 +91,8 @@ if _dataset_videos.exists():
 
 @app.on_event("startup")
 def on_startup() -> None:
+    # 生产环境安全门禁：占位密钥/弱配置直接拒绝启动。
+    settings.validate_production()
     init_db()
     init_admin()
 

@@ -1,0 +1,4 @@
+# 开发/测试依赖（生产部署不需要安装）
+-r requirements.txt
+
+pytest>=8.0
