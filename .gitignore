@@ -46,3 +46,12 @@ formfit_app/**/GeneratedPluginRegistrant.*
 # ===== 日志 =====
 *.log
 logs/
+
+# ===== claude =====
+.multica/
+.claude/
+claude.md
+CLAUDE.md
+description.md
+issue_context.md
+.agent_context/
