@@ -2,8 +2,9 @@
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import admin, auth, exercises, fitness
@@ -21,20 +22,74 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# App / 后台跨域（开发期放开；生产应收紧）
+
+def _build_cors_origins() -> list[str]:
+    """根据配置决定 CORS 允许来源。
+
+    - 生产：必须显式白名单，不允许 "*"（validate_production 已在启动时把关）。
+    - 开发：未配置时回退到 "*"，但此时必须关闭 credentials，
+      避免浏览器规范禁止的 "*" + credentials 组合。
+    """
+    origins = settings.cors_origin_list
+    if origins:
+        # 显式白名单：任何环境都安全（含 credentials）
+        return origins
+    if settings.is_production:
+        # 生产缺白名单不应到这里——validate_production 会先拒绝启动；
+        # 兜底返回空列表，拒绝所有跨域。
+        logger.error("生产环境未配置 cors_origins，CORS 已禁用")
+        return []
+    # 开发环境且未配置：放开来源，但强制关闭 credentials。
+    return ["*"]
+
+
+_cors_origins = _build_cors_origins()
+# credentials 仅在有显式白名单（非空、非通配）时才有意义；
+# "*" 或空白名单都必须关闭，杜绝 *+credentials，也避免空配置带凭证。
+_effective_credentials = bool(
+    settings.cors_allow_credentials and _cors_origins and "*" not in _cors_origins
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_cors_origins,
+    # "*" 与 credentials 不能同时为 True（浏览器会拒绝，也是 WS-2 指出的风险）。
+    allow_credentials=_effective_credentials,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.middleware("http")
+async def limit_upload_size(request: Request, call_next):
+    """在请求进入业务前按 Content-Length 快速拦截超大请求体。
+
+    上传接口还会在读取时做二次校验（Content-Length 可被伪造/分块传输），
+    这里主要是尽早拒绝、避免无谓缓冲。
+    """
+    if request.url.path.startswith("/api/fitness/assess"):
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit():
+            if int(content_length) > settings.upload_max_bytes:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "上传文件过大"},
+                )
+    return await call_next(request)
+
 
 # API 路由
 app.include_router(auth.router)
 app.include_router(exercises.router)
 app.include_router(fitness.router)
 app.include_router(admin.router)
+
+# 兼容旧路径：历史数据里可能存了 /static/exercises/...，统一重定向到 /media/exercises/...
+@app.get("/static/exercises/{rest:path}", include_in_schema=False)
+async def _legacy_media_redirect(rest: str):
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=f"/media/exercises/{rest}", status_code=308)
+
 
 # 静态资源：后台 CSS/JS，以及用户上传（位于 app/static 下）
 _STATIC_DIR = BASE_DIR / "app" / "static"
@@ -63,6 +118,8 @@ if _dataset_videos.exists():
 
 @app.on_event("startup")
 def on_startup() -> None:
+    # 生产环境安全门禁：占位密钥/弱配置直接拒绝启动。
+    settings.validate_production()
     init_db()
     init_admin()
 

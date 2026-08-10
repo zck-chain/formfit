@@ -1,7 +1,5 @@
 """评估、档案、计划生成、训练记录接口（需登录）。"""
-import shutil
 import uuid
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import select
@@ -10,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.agent import planner, qwen_vl_client
 from app.api.deps import get_current_user
 from app.core.config import settings
+from app.core.uploads import UploadValidationError, validate_and_normalize_upload
 from app.db.session import get_db
 from app.models import (
     BodyAssessment,
@@ -29,8 +28,6 @@ from app.schemas.fitness import (
 )
 
 router = APIRouter(prefix="/api/fitness", tags=["fitness"])
-
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
 
 
 # ---------- 用户档案 ----------
@@ -74,15 +71,16 @@ async def assess_body(
     age: int | None = Form(None),
     gender: str | None = Form(None),
 ):
-    if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail="仅支持 JPG/PNG/WebP 图片")
+    # 校验真实图片内容并规范化为 JPEG（不信任 content_type / 扩展名 / Content-Length）。
+    try:
+        image_bytes, ext = await validate_and_normalize_upload(file)
+    except UploadValidationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
 
-    # 保存上传文件
-    ext = Path(file.filename or "img.jpg").suffix or ".jpg"
+    # 保存规范化后的图片
     save_name = f"{user.id}_{uuid.uuid4().hex}{ext}"
     save_path = settings.upload_dir / save_name
-    with save_path.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_path.write_bytes(image_bytes)
 
     # 若表单带了身体数据，顺手更新档案
     profile = _get_or_create_profile(db, user)

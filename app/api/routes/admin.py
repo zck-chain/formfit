@@ -79,7 +79,16 @@ def login_submit(
         )
     token = create_session(user.id)
     resp = RedirectResponse("/admin", status_code=303)
-    resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=60 * 60 * 24 * 7)
+    # 生产环境走 HTTPS 时启用 secure；httponly 防 XSS 读取，samesite=lax 防 CSRF。
+    resp.set_cookie(
+        COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.is_production,
+        max_age=60 * 60 * 24 * 7,
+        path="/",
+    )
     return resp
 
 
