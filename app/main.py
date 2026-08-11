@@ -5,9 +5,12 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.routes import admin, auth, exercises, fitness, membership, payment
 from app.core.config import BASE_DIR, DATASET_DIR, settings
+from app.core.rate_limit import limiter
 from app.db.session import Base, engine
 from app.models import *  # noqa: F401,F403  确保所有模型注册到 Base.metadata
 from app.startup import init_admin, init_db
@@ -21,14 +24,35 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# App / 后台跨域（开发期放开；生产应收紧）
+# 限流：注册到 app，各路由用 @limiter.limit(...) 声明阈值
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request, exc):
+    from fastapi.responses import JSONResponse
+
+    # slowapi 的异常详情转成统一 429
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "请求过于频繁，请稍后再试"},
+        headers={"Retry-After": str(int(exc.limit.limit.get_expiry()))},
+    )
+
+
+# CORS：从配置读取来源白名单。生产绝不使用 allow_origins=["*"] + credentials。
+cors_origins = settings.effective_cors_origins()
+if settings.is_production and not cors_origins:
+    logger.info("生产环境未配置 CORS_ORIGINS，仅允许同源请求（不放开跨域）")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
 )
+logger.info("CORS 允许来源：%s", cors_origins or "(仅同源)")
 
 # API 路由
 app.include_router(auth.router)
