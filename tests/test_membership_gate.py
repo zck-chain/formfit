@@ -1,6 +1,7 @@
 """PRO 会员门控与免费额度测试。
 
-PRO 不限次；free 用户每个 PRO 功能每月各 5 次（默认），第 6 次 402 quota_exhausted。
+PRO 不限次；free 用户体态评估与 AI 计划生成**共享**每月 5 次额度池（默认），
+两功能合计第 6 次调用返回 402 quota_exhausted。
 """
 from datetime import datetime, timedelta, timezone
 
@@ -117,13 +118,16 @@ def test_free_user_first_assess_passes_quota_gate(
         files={"file": ("a.png", buf.getvalue(), "image/png")},
     )
     assert resp.status_code == 200, resp.text
-    # 响应头带的是门控评估时（本次调用前）的剩余额度：首次为满额
+    # 响应头带的是门控评估时（本次调用前）的共享池剩余：首次为满额
     assert resp.headers["X-Quota-Feature"] == "assess"
     assert resp.headers["X-Quota-Remaining"] == str(settings.free_quota_per_month)
-    # 调用成功后已新增一条记录，/membership 反映已用 1 次
+    # 调用成功后已新增一条记录，/membership 共享池已用 1 次
     mem = client.get("/api/membership", headers=headers).json()
-    assert mem["quota"]["assess"]["used"] == 1
-    assert mem["quota"]["assess"]["remaining"] == settings.free_quota_per_month - 1
+    assert mem["quota"]["scope"] == "shared"
+    assert mem["quota"]["used"] == 1
+    assert mem["quota"]["remaining"] == settings.free_quota_per_month - 1
+    assert mem["quota"]["breakdown"]["assess"] == 1
+    assert mem["quota"]["breakdown"]["generate_plan"] == 0
 
 
 def test_free_user_first_generate_plan_passes_quota_gate(client, register_user, monkeypatch):
@@ -141,31 +145,40 @@ def test_free_user_first_generate_plan_passes_quota_gate(client, register_user, 
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["title"] == "免费额度内计划"
-    # 门控头反映本次调用前的剩余（满额）；成功后 /membership 显示已用 1 次
+    # 门控头反映本次调用前的共享池剩余（满额）；成功后 /membership 显示已用 1 次
     assert resp.headers["X-Quota-Remaining"] == str(settings.free_quota_per_month)
     mem = client.get("/api/membership", headers=headers).json()
-    assert mem["quota"]["generate_plan"]["used"] == 1
-    assert mem["quota"]["generate_plan"]["remaining"] == settings.free_quota_per_month - 1
+    assert mem["quota"]["used"] == 1
+    assert mem["quota"]["remaining"] == settings.free_quota_per_month - 1
+    assert mem["quota"]["breakdown"]["generate_plan"] == 1
 
 
-def test_quota_is_per_feature_not_shared(client, register_user, db_session, monkeypatch):
-    """评估与计划生成各算各的：评估额度用尽不影响计划生成（反之亦然）。"""
+def test_shared_pool_mixed_usage_then_blocked(client, register_user, db_session, monkeypatch):
+    """共享池：3 次 assess + 2 次 plan = 5，第 6 次无论 assess 还是 plan 都 402。"""
     headers, user = register_user()
-    # 只把评估额度用尽
-    _seed_assessments(db_session, user["id"], settings.free_quota_per_month)
+    _seed_assessments(db_session, user["id"], 3)
+    _seed_plans(db_session, user["id"], 2)
 
-    async def _fake_generate(db, profile, assessment):
-        return {"title": "计划仍可用", "weeks": 4, "days_per_week": 3, "items": []}
+    async def _fake_generate(db, profile, assessment):  # pragma: no cover
+        raise AssertionError("超额时不应进入计划生成逻辑")
+
+    async def _fake_assess(path, **kwargs):  # pragma: no cover
+        raise AssertionError("超额时不应进入评估逻辑")
 
     monkeypatch.setattr("app.agent.planner.generate_plan", _fake_generate)
+    monkeypatch.setattr("app.agent.qwen_vl_client.assess_body", _fake_assess)
 
-    # 计划生成未超额，应放行
+    # 第 6 次：plan 被 402，共享池 used=5
     resp = client.post(
         "/api/fitness/plans/generate", headers=headers, json={"goal": "减脂"}
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 402, resp.text
+    body = resp.json()["detail"]
+    assert body["error"] == "quota_exhausted"
+    assert body["used"] == settings.free_quota_per_month
+    assert body["feature"] == "generate_plan"
 
-    # 评估超额，402
+    # 第 6 次换成 assess 同样 402（同一池子）
     resp2 = client.post(
         "/api/fitness/assess",
         headers=headers,
@@ -173,6 +186,26 @@ def test_quota_is_per_feature_not_shared(client, register_user, db_session, monk
     )
     assert resp2.status_code == 402
     assert resp2.json()["detail"]["feature"] == "assess"
+    assert resp2.json()["detail"]["used"] == settings.free_quota_per_month
+
+
+def test_shared_pool_mixed_within_limit_passes(client, register_user, db_session, monkeypatch):
+    """共享池内混用：2 assess + 2 plan = 4，第 5 次（plan）仍放行。"""
+    headers, user = register_user()
+    _seed_assessments(db_session, user["id"], 2)
+    _seed_plans(db_session, user["id"], 2)
+
+    async def _fake_generate(db, profile, assessment):
+        return {"title": "池内第5次", "weeks": 4, "days_per_week": 3, "items": []}
+
+    monkeypatch.setattr("app.agent.planner.generate_plan", _fake_generate)
+
+    resp = client.post(
+        "/api/fitness/plans/generate", headers=headers, json={"goal": "增肌"}
+    )
+    assert resp.status_code == 200, resp.text
+    # 门控时 used=4，剩余 1
+    assert resp.headers["X-Quota-Remaining"] == "1"
 
 
 def test_anonymous_blocked(client):
@@ -192,14 +225,14 @@ def test_membership_free_default(client, register_user):
     assert data["is_pro"] is False
     assert data["features_locked"] is True
     assert data["expire_at"] is None
-    # 配额字段
+    # 共享额度池字段
     q = data["quota"]
-    assert set(q.keys()) == {"assess", "generate_plan"}
-    for feat in ("assess", "generate_plan"):
-        assert q[feat]["limit"] == settings.free_quota_per_month
-        assert q[feat]["used"] == 0
-        assert q[feat]["remaining"] == settings.free_quota_per_month
-        assert q[feat]["reset_at"] is not None
+    assert q["scope"] == "shared"
+    assert q["limit"] == settings.free_quota_per_month
+    assert q["used"] == 0
+    assert q["remaining"] == settings.free_quota_per_month
+    assert q["reset_at"] is not None
+    assert q["breakdown"] == {"assess": 0, "generate_plan": 0}
 
 
 def test_membership_quota_reflects_usage(client, register_user, db_session):
@@ -207,22 +240,22 @@ def test_membership_quota_reflects_usage(client, register_user, db_session):
     _seed_assessments(db_session, user["id"], 3)
     _seed_plans(db_session, user["id"], 1)
     data = client.get("/api/membership", headers=headers).json()
-    assert data["quota"]["assess"]["used"] == 3
-    assert data["quota"]["assess"]["remaining"] == settings.free_quota_per_month - 3
-    assert data["quota"]["generate_plan"]["used"] == 1
-    assert data["quota"]["generate_plan"]["remaining"] == settings.free_quota_per_month - 1
+    # 共享池：合计已用 4，剩余 1
+    assert data["quota"]["used"] == 4
+    assert data["quota"]["remaining"] == settings.free_quota_per_month - 4
+    assert data["quota"]["breakdown"] == {"assess": 3, "generate_plan": 1}
 
 
 def test_membership_pro_quota_unlimited(client, register_user, db_session):
-    """PRO 用户 remaining 为 null（不限次），但仍展示已用次数。"""
+    """PRO 用户 remaining 为 null（不限次），但仍展示已用次数与拆分。"""
     headers, user = register_user()
     _grant_pro(db_session, user["id"])
     _seed_assessments(db_session, user["id"], 99)
     data = client.get("/api/membership", headers=headers).json()
     assert data["is_pro"] is True
     assert data["features_locked"] is False
-    assert data["quota"]["assess"]["used"] == 99
-    assert data["quota"]["assess"]["remaining"] is None
+    assert data["quota"]["used"] == 99
+    assert data["quota"]["remaining"] is None
 
 
 def test_membership_anonymous_401(client):
@@ -343,14 +376,28 @@ def test_quota_resets_across_months(db_session, register_user):
         db_session.add(rec)
     db_session.commit()
 
-    # 本月计数应为 0（跨月重置）
-    assert membership_service.quota_used(db_session, user_id, "assess", now=now) == 0
+    # 本月共享池计数应为 0（跨月重置）
+    assert membership_service.quota_used(db_session, user_id, now=now) == 0
     status = membership_service.check_quota(db_session, user_id, "assess", now=now)
     assert status["used"] == 0
     assert status["remaining"] == settings.free_quota_per_month
     assert status["exhausted"] is False
     # reset_at 为次月 1 日
     assert status["reset_at"] == datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+
+def test_shared_pool_sums_both_tables(db_session, register_user):
+    """共享池 used = 本月 body_assessments + plans 记录数之和。"""
+    from app.services import membership_service
+
+    _, user = register_user()
+    _seed_assessments(db_session, user["id"], 2)
+    _seed_plans(db_session, user["id"], 2)
+    assert membership_service.quota_used(db_session, user["id"]) == 4
+    st = membership_service.check_quota(db_session, user["id"], "generate_plan")
+    assert st["used"] == 4
+    assert st["remaining"] == settings.free_quota_per_month - 4
+    assert st["exhausted"] is False
 
 
 def test_quota_month_boundary_wraps_december(db_session, register_user):

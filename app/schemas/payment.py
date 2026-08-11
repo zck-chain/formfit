@@ -73,15 +73,19 @@ class RestoreIn(BaseModel):
 
 
 class QuotaOut(BaseModel):
-    """单个 PRO 功能的月度配额状态。"""
+    """免费档月度共享额度池状态（体态评估与 AI 计划生成共用同一池子）。"""
 
-    feature: str
-    limit: int = Field(..., description="每月免费次数上限")
-    used: int = Field(..., description="本月已用次数（UTC 自然月）")
+    scope: str = Field("shared", description="额度口径：shared=两功能共享同一池子")
+    limit: int = Field(..., description="每月免费次数上限（共享池总额）")
+    used: int = Field(..., description="本月已用次数（UTC 自然月，两功能之和）")
     remaining: int | None = Field(
         ..., description="剩余次数；PRO 用户为 null（不限次）"
     )
     reset_at: datetime = Field(..., description="额度重置时间（次月 1 日 UTC）")
+    breakdown: dict[str, int] = Field(
+        default_factory=dict,
+        description="本月已用次数按功能拆分，仅展示用（assess/generate_plan）",
+    )
 
 
 class MembershipOut(BaseModel):
@@ -96,10 +100,9 @@ class MembershipOut(BaseModel):
     features_locked: bool = Field(
         ..., description="PRO 功能是否被锁定（true 时前端应弹付费墙）"
     )
-    # 免费档月度配额：每个 PRO 功能本月 limit/used/remaining/reset_at；
-    # PRO 用户 remaining 为 null（不限次）。
-    quota: dict[str, QuotaOut] = Field(
-        default_factory=dict, description="各 PRO 功能的本月免费额度状态"
+    # 免费档月度共享额度池：体态评估与计划生成共用 5 次/月。
+    quota: QuotaOut | None = Field(
+        default=None, description="本月共享免费额度状态；PRO 用户 remaining=null"
     )
 
     model_config = {"from_attributes": True}

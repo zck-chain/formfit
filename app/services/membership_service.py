@@ -11,8 +11,10 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models import BodyAssessment, Membership, Plan, User
 
-# 受 PRO 门控、同时计入免费额度的功能 -> 计数所依据的模型（成功记录数）。
-# 口径：每个功能每月各 FREE_QUOTA_PER_MONTH 次（非共享池）。
+# 计入免费额度池的 PRO 功能 -> 成功记录所对应的模型。
+# 口径（产品已确认）：体态评估与 AI 计划生成**共享**同一个月度额度池，
+# 任一功能的一次成功调用都从同一池子扣减；这里保留 feature->model 映射仅用于
+# breakdown 展示拆分，计数（quota_used）是跨所有模型求和。
 QUOTA_FEATURE_MODELS = {
     "assess": BodyAssessment,
     "generate_plan": Plan,
@@ -71,32 +73,21 @@ def membership_view(m: Membership | None) -> dict:
     }
 
 
-# ---------- 免费档月度配额 ----------
+# ---------- 免费档月度配额（共享池）----------
 def month_bounds(now: datetime | None = None) -> tuple[datetime, datetime]:
     """返回当前自然月（UTC）的 [start, next_start) 边界，均为 aware UTC。"""
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    # 次月 1 日（12 月跨年由 monthrange/date 语义处理）
+    # 次月 1 日（12 月跨年由 replace 语义处理）
     next_month_year = start.year + (1 if start.month == 12 else 0)
     next_month_month = 1 if start.month == 12 else start.month + 1
     next_start = start.replace(year=next_month_year, month=next_month_month)
     return start, next_start
 
 
-def quota_used(db: Session, user_id: int, feature: str, now: datetime | None = None) -> int:
-    """免费用户某功能本月（UTC 自然月）已成功使用次数。
-
-    `assess` 计 body_assessments 成功记录；`generate_plan` 计 plans 记录。
-    仅统计本月创建的记录——门控在处理前查询，因此本次调用尚未产生记录，
-    used 即此前已成功完成的次数。
-    """
-    model = QUOTA_FEATURE_MODELS.get(feature)
-    if model is None:
-        # 未纳入配额的功能不计数（交由上层 PRO 硬门控）
-        return 0
-    start, end = month_bounds(now)
+def _count_model(db: Session, model, user_id: int, start: datetime, end: datetime) -> int:
     stmt = (
         select(func.count())
         .select_from(model)
@@ -109,49 +100,56 @@ def quota_used(db: Session, user_id: int, feature: str, now: datetime | None = N
     return int(db.scalar(stmt) or 0)
 
 
-def quota_status(
-    db: Session, user_id: int, feature: str, now: datetime | None = None
-) -> dict:
-    """返回单个功能的配额视图：limit/used/remaining/reset_at。
-
-    PRO 用户语义上不限（remaining 以 None 表示无上限），但仍返回已用次数供展示。
-    """
-    limit = settings.free_quota_per_month
-    used = quota_used(db, user_id, feature, now)
-    _, next_start = month_bounds(now)
+def quota_breakdown(
+    db: Session, user_id: int, now: datetime | None = None
+) -> dict[str, int]:
+    """返回本月各功能已用次数拆分，仅作展示用（不代表独立额度）。"""
+    start, end = month_bounds(now)
     return {
-        "feature": feature,
-        "limit": limit,
-        "used": used,
-        # PRO 用户不限；free 用户剩余 = max(0, limit-used)
-        "remaining": None,
-        "reset_at": next_start,
+        feature: _count_model(db, model, user_id, start, end)
+        for feature, model in QUOTA_FEATURE_MODELS.items()
     }
 
 
-def all_quota_status(db: Session, user_id: int, now: datetime | None = None) -> dict[str, dict]:
-    """返回所有受门控功能的配额状态，供 /api/membership 一次性展示。"""
+def quota_used(db: Session, user_id: int, now: datetime | None = None) -> int:
+    """免费用户本月（UTC 自然月）已用的共享额度次数。
+
+    统计 body_assessments 与 plans 两张表本月成功记录数之和——
+    assess 和 generate_plan 任一次调用都从同一池子扣减。
+    门控在处理前查询，因此本次调用尚未产生记录，used 即此前已成功完成的次数。
+    """
+    return sum(quota_breakdown(db, user_id, now).values())
+
+
+def quota_status(db: Session, user_id: int, now: datetime | None = None) -> dict:
+    """返回共享额度池视图：scope/limit/used/remaining/reset_at/breakdown。
+
+    PRO 用户语义上不限（remaining=None），但仍返回已用次数与拆分供展示。
+    """
+    limit = settings.free_quota_per_month
+    used = quota_used(db, user_id, now)
+    _, next_start = month_bounds(now)
     pro = is_pro(db, user_id)
-    out: dict[str, dict] = {}
-    for feature in QUOTA_FEATURE_MODELS:
-        st = quota_status(db, user_id, feature, now)
-        if pro:
-            st["remaining"] = None
-        else:
-            st["remaining"] = max(0, st["limit"] - st["used"])
-        out[feature] = st
-    return out
+    return {
+        "scope": "shared",
+        "limit": limit,
+        "used": used,
+        "remaining": None if pro else max(0, limit - used),
+        "reset_at": next_start,
+        "breakdown": quota_breakdown(db, user_id, now),
+    }
 
 
 def check_quota(
     db: Session, user_id: int, feature: str, now: datetime | None = None
 ) -> dict:
-    """门控前置检查：返回 free 用户在该功能上的配额状态。
+    """门控前置检查：返回 free 用户的共享额度池状态。
 
+    `feature` 仅用于响应标识/日志，不影响计数（两个功能共享同一池子）。
     调用方在确认用户非 PRO 后调用本函数；若 used >= limit 应拒绝（402），
-    否则放行（本次调用成功后会新增一条记录，自然计入下月之前的额度）。
+    否则放行（本次调用成功后会新增一条记录，自然计入当月额度）。
     """
-    st = quota_status(db, user_id, feature, now)
-    st["remaining"] = max(0, st["limit"] - st["used"])
+    st = quota_status(db, user_id, now)
+    st["feature"] = feature
     st["exhausted"] = st["used"] >= st["limit"]
     return st
