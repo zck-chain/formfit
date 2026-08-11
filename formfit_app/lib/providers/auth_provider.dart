@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/repository.dart';
 import '../api/api_client.dart';
 import '../models/user.dart';
+import 'membership_provider.dart';
 
 /// 认证状态
 class AuthState {
@@ -46,9 +49,19 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final user = await _fetchMe();
       final profile = await _ref.read(apiRepositoryProvider).getProfile();
       state = AuthState(user: user, profile: profile);
+      // 加载会员权益（失败不阻塞进入 App，保持默认 free 锁定态）。
+      unawaited(_safeRefreshMembership());
     } catch (_) {
       // token 失效，清理
       await logout();
+    }
+  }
+
+  Future<void> _safeRefreshMembership() async {
+    try {
+      await _ref.read(membershipProvider.notifier).refresh();
+    } catch (_) {
+      // 网络抖动等：保留默认 free 态，不影响登录。
     }
   }
 
@@ -69,6 +82,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
         profile = await _ref.read(apiRepositoryProvider).getProfile();
       } catch (_) {}
       state = AuthState(user: user, profile: profile);
+      unawaited(_safeRefreshMembership());
       return true;
     } catch (e) {
       state = state.copyWith(isLoading: false, error: _err(e));
@@ -84,6 +98,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await _saveAuth(data);
       final user = AppUser.fromJson(data['user']);
       state = AuthState(user: user);
+      unawaited(_safeRefreshMembership());
       return true;
     } catch (e) {
       state = state.copyWith(isLoading: false, error: _err(e));
@@ -107,6 +122,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     _ref.read(tokenStoreProvider).clear();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
+    _ref.read(membershipProvider.notifier).reset();
     state = const AuthState();
   }
 

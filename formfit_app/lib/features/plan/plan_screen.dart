@@ -4,9 +4,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/repository.dart';
 import '../../models/plan.dart';
+import '../paywall/pro_gate.dart';
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/exercise_image.dart';
+import '../../widgets/safety_notice.dart';
 
 /// 当前活跃计划（内存缓存，进入页面时拉取）
 final activePlanProvider =
@@ -33,18 +35,48 @@ class ActivePlanNotifier extends StateNotifier<AsyncValue<Plan?>> {
   }
 
   Future<void> generate() async {
+    await runGenerate(_ref.read(apiRepositoryProvider).generatePlan);
+  }
+
+  /// 执行一个「生成计划」任务并管理 loading/data/error 状态。
+  /// 供付费门控在 402 → 开通后重试时复用同一任务。
+  Future<void> runGenerate(Future<Plan> Function() task) async {
     state = const AsyncValue.loading();
     try {
-      final plan = await _ref.read(apiRepositoryProvider).generatePlan();
+      final plan = await task();
       state = AsyncValue.data(plan);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     }
   }
+
+  /// 把外部（如门控）捕获到的错误写入当前状态以展示错误视图。
+  void setError(Object e, StackTrace st) {
+    state = AsyncValue.error(e, st);
+  }
 }
 
 class PlanScreen extends ConsumerWidget {
   const PlanScreen({super.key});
+
+  /// 生成计划，命中 PRO 门控时弹付费墙并在开通后自动重试。
+  Future<void> _generateWithGate(BuildContext context, WidgetRef ref) async {
+    final notifier = ref.read(activePlanProvider.notifier);
+    final repo = ref.read(apiRepositoryProvider);
+    try {
+      final result = await ProGate.run<Plan>(
+        context,
+        ref,
+        repo.generatePlan,
+        source: '生成计划',
+      );
+      if (result.isSuccess) {
+        notifier.runGenerate(() async => result.value!);
+      }
+    } catch (e, st) {
+      notifier.setError(e, st);
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -96,6 +128,12 @@ class PlanScreen extends ConsumerWidget {
           ),
         ),
         const SizedBox(height: 20),
+        const SafetyNotice(
+          level: SafetyNoticeLevel.info,
+          message: '训练计划由 AI 根据你的档案生成，仅供健身参考。'
+              '请根据自身状态调整强度，训练中如出现头晕、胸闷或急性疼痛请立即停止并就医。',
+        ),
+        const SizedBox(height: 20),
         const Padding(
           padding: EdgeInsets.only(left: 4, bottom: 8),
           child: Text('训练日',
@@ -144,8 +182,7 @@ class PlanScreen extends ConsumerWidget {
               ),
             const SizedBox(height: 12),
             ElevatedButton.icon(
-              onPressed: () =>
-                  ref.read(activePlanProvider.notifier).generate(),
+              onPressed: () => _generateWithGate(context, ref),
               icon: const Icon(Icons.bolt, color: Colors.black),
               label: const Text('AI 生成计划',
                   style: TextStyle(color: Colors.black)),

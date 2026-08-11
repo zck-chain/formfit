@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/cyber/cyber_background.dart';
+import '../../widgets/cyber/glow_button.dart';
+import '../../widgets/cyber/hud_card.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -13,7 +17,7 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _email = TextEditingController(text: 'xiaoming@example.com');
+  final _email = TextEditingController(text: 'demo@example.com');
   final _password = TextEditingController(text: '123456');
   bool _obscure = true;
 
@@ -36,79 +40,73 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 24),
-                _logo(),
-                const SizedBox(height: 12),
-                const Text(
-                  '欢迎回来',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -.5),
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  '登录后开启你的 AI 私教',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: AppColors.textSecondary, fontSize: 14),
-                ),
-                const SizedBox(height: 36),
-                if (auth.error != null) _errorBox(auth.error!),
-                TextField(
-                  controller: _email,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: '邮箱',
-                    prefixIcon: Icon(Icons.alternate_email),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: _password,
-                  obscureText: _obscure,
-                  decoration: InputDecoration(
-                    labelText: '密码',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    suffixIcon: IconButton(
-                      icon: Icon(_obscure
-                          ? Icons.visibility_off_outlined
-                          : Icons.visibility_outlined),
-                      onPressed: () => setState(() => _obscure = !_obscure),
+      body: CyberBackground(
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 40),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _logo(),
+                  const SizedBox(height: 28),
+                  _headline(),
+                  const SizedBox(height: 28),
+                  HudCard(
+                    cornerColor: AppColors.energy,
+                    glow: true,
+                    padding: const EdgeInsets.all(22),
+                    child: Column(
+                      children: [
+                        if (auth.error != null) _errorBox(auth.error!),
+                        _field(
+                          controller: _email,
+                          label: 'EMAIL',
+                          icon: Icons.alternate_email_rounded,
+                        ),
+                        const SizedBox(height: 14),
+                        _field(
+                          controller: _password,
+                          label: 'PASSWORD',
+                          icon: Icons.lock_outline_rounded,
+                          obscure: _obscure,
+                          suffix: IconButton(
+                            icon: Icon(_obscure
+                                ? Icons.visibility_off_outlined
+                                : Icons.visibility_outlined),
+                            color: AppColors.textMuted,
+                            onPressed: () =>
+                                setState(() => _obscure = !_obscure),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                const SizedBox(height: 28),
-                ElevatedButton(
-                  onPressed: auth.isLoading ? null : _submit,
-                  child: auth.isLoading
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2.5, color: Colors.white),
-                        )
-                      : const Text('登 录'),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text('还没有账号？',
-                        style: TextStyle(color: AppColors.textSecondary)),
-                    TextButton(
-                      onPressed: () => context.push('/register'),
-                      child: const Text('立即注册'),
-                    ),
-                  ],
-                ),
-              ],
+                  const SizedBox(height: 24),
+                  GlowButton(
+                    label: 'INITIATE',
+                    icon: Icons.bolt_rounded,
+                    loading: auth.isLoading,
+                    onTap: _submit,
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text('还没有账号？',
+                          style: TextStyle(
+                              color: AppColors.textSecondary, fontSize: 14)),
+                      TextButton(
+                        onPressed: () => context.push('/register'),
+                        style: TextButton.styleFrom(
+                            foregroundColor: AppColors.cyan),
+                        child: const Text('立即注册',
+                            style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -117,39 +115,116 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 
   Widget _logo() {
-    return Center(
-      child: Container(
-        width: 76,
-        height: 76,
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
-          gradient: AppColors.primaryGradient,
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.primary.withValues(alpha: 0.35),
-              blurRadius: 24,
-              offset: const Offset(0, 10),
+    return Row(
+      children: [
+        Container(
+          width: 52, height: 52,
+          decoration: BoxDecoration(
+            gradient: AppColors.energyGradient,
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                  color: AppColors.energy.withValues(alpha: 0.5),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6)),
+            ],
+          ),
+          child: const Icon(Icons.bolt_rounded, color: Colors.black, size: 30),
+        ),
+        const SizedBox(width: 14),
+        Text('FormFit',
+            style: AppTheme.display(28, weight: FontWeight.w800)),
+      ],
+    ).animate().fadeIn(duration: 500.ms).slideX(begin: -0.1);
+  }
+
+  Widget _headline() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('PUSH',
+            style: AppTheme.display(46,
+                weight: FontWeight.w800,
+                color: AppColors.textPrimary)),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ShaderMask(
+              shaderCallback: (b) => const LinearGradient(
+                colors: [AppColors.energy, AppColors.cyan],
+              ).createShader(b),
+              child: Text('YOUR LIMITS',
+                  style: AppTheme.display(46,
+                      weight: FontWeight.w800, color: Colors.white)),
             ),
+            const Text('.',
+                style: TextStyle(
+                    color: AppColors.hot,
+                    fontSize: 46,
+                    fontWeight: FontWeight.w800)),
           ],
         ),
-        child: const Icon(Icons.fitness_center, color: Colors.black, size: 38),
-      ),
+        const SizedBox(height: 10),
+        const Text('// AI 私教已就绪，等待启动训练协议',
+            style: TextStyle(
+                fontFamily: 'monospace',
+                color: AppColors.textSecondary,
+                fontSize: 13)),
+      ],
+    ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.1);
+  }
+
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required IconData icon,
+    bool obscure = false,
+    Widget? suffix,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 11,
+                color: AppColors.textMuted,
+                letterSpacing: 1)),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          obscureText: obscure,
+          style: const TextStyle(color: AppColors.textPrimary, fontSize: 15),
+          keyboardType: label == 'EMAIL'
+              ? TextInputType.emailAddress
+              : TextInputType.text,
+          decoration: InputDecoration(
+            prefixIcon: Icon(icon, color: AppColors.textMuted, size: 20),
+            suffixIcon: suffix,
+          ),
+        ),
+      ],
     );
   }
 
   Widget _errorBox(String msg) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.danger.withValues(alpha: 0.1),
+        color: AppColors.danger.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline, color: AppColors.danger, size: 20),
+          const Icon(Icons.error_outline_rounded,
+              color: AppColors.danger, size: 20),
           const SizedBox(width: 8),
-          Expanded(child: Text(msg, style: const TextStyle(color: AppColors.danger, fontSize: 13))),
+          Expanded(
+              child: Text(msg,
+                  style: const TextStyle(
+                      color: AppColors.danger, fontSize: 13))),
         ],
       ),
     );

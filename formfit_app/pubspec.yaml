@@ -25,12 +25,21 @@ dependencies:
   # 图片选择/拍照
   image_picker: ^1.1.2
 
+  # Apple 内购（iOS/macOS）
+  in_app_purchase: ^3.2.0
+
   # GIF / 网络图缓存
   cached_network_image: ^3.4.1
 
   # 工具
   intl: ^0.19.0
   flutter_svg: ^2.0.16
+
+  # 字体
+  google_fonts: ^6.2.1
+  flutter_animate: ^4.5.2
+  glassmorphism: ^3.0.0
+  particles_network: ^1.9.5
 
 dev_dependencies:
   flutter_lints: ^5.0.0

@@ -96,11 +96,21 @@ class _WorkoutScreenState extends ConsumerState<WorkoutScreen> {
       ),
       error: (e, _) => Scaffold(body: Center(child: Text('$e'))),
       data: (p) {
+        if (_finished) return _finishView();
+        final days = p?.content.days ?? const [];
+        if (p == null ||
+            widget.dayIndex < 0 ||
+            widget.dayIndex >= days.length ||
+            days[widget.dayIndex].items.isEmpty) {
+          return Scaffold(
+            appBar: AppBar(),
+            body: const Center(child: Text('该训练日没有可训练的动作')),
+          );
+        }
         if (!_logsReady) {
           _initLogs();
           _logsReady = true;
         }
-        if (_finished) return _finishView();
         return _workoutView();
       },
     );

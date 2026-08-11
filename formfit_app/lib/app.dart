@@ -6,6 +6,7 @@ import 'features/assessment/assessment_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/register_screen.dart';
 import 'features/home/main_scaffold.dart';
+import 'features/paywall/paywall_screen.dart';
 import 'features/plan/plan_detail_screen.dart';
 import 'features/plan/plan_screen.dart';
 import 'features/profile/profile_screen.dart';
@@ -30,6 +31,7 @@ final _router = GoRouter(
     GoRoute(path: '/', builder: (_, __) => const MainScaffold()),
     GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
     GoRoute(path: '/assessment', builder: (_, __) => const AssessmentScreen()),
+    GoRoute(path: '/paywall', builder: (_, __) => const PaywallScreen()),
     GoRoute(path: '/plan', builder: (_, __) => const PlanScreen()),
     GoRoute(
       path: '/plan/:dayIndex',
@@ -54,9 +56,9 @@ class FormFitApp extends ConsumerWidget {
 
     return MaterialApp.router(
       title: 'FormFit',
-      theme: AppTheme.light,
+      theme: AppTheme.dark,
       darkTheme: AppTheme.dark,
-      themeMode: ThemeMode.system,
+      themeMode: ThemeMode.dark,
       debugShowCheckedModeBanner: false,
       routerConfig: _router,
     );

@@ -14,29 +14,34 @@
   </div>
 </div>
 
-<!-- KPI：顶部色条区分类型，GitHub 风格大数字 -->
+<!-- KPI：HUD 角框科技风 -->
 <div class="kpi-grid">
-  <div class="kpi k-accent">
+  <div class="kpi k-cyan">
+    <span class="kpi-corner-tl"></span><span class="kpi-corner-br"></span>
     <div class="kpi-label">{{ icon('users') }} 注册用户</div>
     <div class="kpi-value">{{ "{:,}".format(k.total_users) }}</div>
     <div class="kpi-delta up">{{ icon('graph') }} 近 7 天 +{{ k.new_users_7 }}</div>
   </div>
   <div class="kpi k-success">
+    <span class="kpi-corner-tl"></span><span class="kpi-corner-br"></span>
     <div class="kpi-label">{{ icon('crown') }} 付费会员</div>
     <div class="kpi-value">{{ "{:,}".format(k.pro_users) }}</div>
     <div class="kpi-delta">转化率 {{ k.conversion_rate }}%</div>
   </div>
-  <div class="kpi k-done">
+  <div class="kpi">
+    <span class="kpi-corner-tl"></span><span class="kpi-corner-br"></span>
     <div class="kpi-label">{{ icon('inbox') }} 生成计划</div>
     <div class="kpi-value">{{ "{:,}".format(k.total_plans) }}</div>
     <div class="kpi-delta">人均 {{ "%.1f"|format(k.total_plans / k.total_users if k.total_users else 0) }} 份</div>
   </div>
-  <div class="kpi k-attention">
+  <div class="kpi k-warning">
+    <span class="kpi-corner-tl"></span><span class="kpi-corner-br"></span>
     <div class="kpi-label">{{ icon('image') }} 体态评估</div>
     <div class="kpi-value">{{ "{:,}".format(k.total_assessments) }}</div>
     <div class="kpi-delta">人均 {{ "%.1f"|format(k.total_assessments / k.total_users if k.total_users else 0) }} 次</div>
   </div>
-  <div class="kpi k-danger">
+  <div class="kpi k-hot">
+    <span class="kpi-corner-tl"></span><span class="kpi-corner-br"></span>
     <div class="kpi-label">{{ icon('pulse') }} 训练记录</div>
     <div class="kpi-value">{{ "{:,}".format(k.total_logs) }}</div>
     <div class="kpi-delta">人均 {{ "%.1f"|format(k.total_logs / k.total_users if k.total_users else 0) }} 次</div>

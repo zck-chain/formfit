@@ -2,13 +2,16 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../api/repository.dart';
 import '../../models/assessment.dart';
+import '../paywall/pro_gate.dart';
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/badges.dart';
+import '../../widgets/safety_notice.dart';
 
 class AssessmentScreen extends ConsumerStatefulWidget {
   const AssessmentScreen({super.key});
@@ -46,14 +49,21 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
       _error = null;
     });
     try {
-      final result = await ref.read(apiRepositoryProvider).assess(
-            image: _image!,
-            heightCm: profile?.heightCm,
-            weightKg: profile?.weightKg,
-            age: profile?.age,
-            gender: profile?.gender,
-          );
-      setState(() => _result = result);
+      final result = await ProGate.run<Assessment>(
+        context,
+        ref,
+        () => ref.read(apiRepositoryProvider).assess(
+              image: _image!,
+              heightCm: profile?.heightCm,
+              weightKg: profile?.weightKg,
+              age: profile?.age,
+              gender: profile?.gender,
+            ),
+        source: '体态评估',
+      );
+      if (result.isSuccess) {
+        setState(() => _result = result.value);
+      }
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -286,33 +296,34 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
           ],
           if (r.safetyNotes != null && r.safetyNotes!.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.warning.withValues(alpha: .1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline,
-                      color: AppColors.warning, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(r.safetyNotes!,
-                        style: const TextStyle(
-                            color: AppColors.warning, fontSize: 12)),
-                  ),
-                ],
-              ),
+            SafetyNotice(
+              level: r.isHighRisk
+                  ? SafetyNoticeLevel.danger
+                  : SafetyNoticeLevel.warning,
+              message: r.safetyNotes!,
+              referralText: r.isHighRisk ? r.referralAdvice : null,
+            ),
+          ] else ...[
+            const SizedBox(height: 16),
+            const SafetyNotice(
+              level: SafetyNoticeLevel.info,
+              message: 'AI 评估结果仅供健身参考，不构成医疗诊断。'
+                  '如有持续疼痛或既往伤病史，请在训练前咨询专业医生或物理治疗师。',
             ),
           ],
           const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed: () => Navigator.of(context).pop(r),
+              onPressed: () {
+                // 评估完成后进入计划页生成专属计划。
+                // 注：generatePlan 基于服务端档案编排，不直接接收本次评估结果，
+                // 评估方向用于用户参考；如需把评估结果纳入生成，属后端契约变更。
+                Navigator.of(context).pop();
+                context.push('/plan');
+              },
               icon: const Icon(Icons.assignment_add, color: Colors.black),
-              label: const Text('用这个结果生成计划',
+              label: const Text('去生成训练计划',
                   style: TextStyle(color: Colors.black)),
             ),
           ),
