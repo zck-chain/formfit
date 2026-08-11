@@ -43,6 +43,12 @@ def db_session(db_engine):
 
 @pytest.fixture()
 def client(db_session):
+    # /healthz 直接使用全局 engine 探活；测试期把它指向内存引擎，
+    # 避免在工作树创建真实 formfit.db 文件。
+    from app.core import health as health_module
+    real_engine = health_module.engine
+    health_module.engine = db_session.bind
+
     def _override_get_db():
         try:
             yield db_session
@@ -53,6 +59,7 @@ def client(db_session):
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+    health_module.engine = real_engine
 
 
 @pytest.fixture()

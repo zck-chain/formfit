@@ -1,0 +1,45 @@
+# FormFit 后端单机编排（适配 1Panel「容器 → 编排」或 `docker compose up -d`）。
+#
+# 硬约束：SQLite 生产仅允许单容器、单 worker（见 Dockerfile CMD --workers 1）。
+# 不要把 replicas 调到 >1，也不要把 WEB_CONCURRENCY 设为 >1，否则会写锁竞争甚至损坏库。
+#
+# 用法：
+#   1. 复制 .env.example 为 .env，填好生产变量（密钥、CORS、管理员强密码等）。
+#   2. docker compose --env-file .env up -d
+#   3. 用 1Panel 网站反向代理到 127.0.0.1:8000 并签发 Let's Encrypt 证书。
+
+services:
+  formfit:
+    build: .
+    image: formfit-backend:latest
+    container_name: formfit
+    restart: unless-stopped
+    # 单 worker 硬约束：不要加 --scale，也不要设 WEB_CONCURRENCY>1
+    env_file:
+      - .env
+    environment:
+      # 运行期路径：全部落在持久卷 /data
+      DATABASE_URL: sqlite:////data/formfit/formfit.db
+      UPLOAD_DIR: /data/uploads
+      APP_HOST: 0.0.0.0
+      APP_PORT: "8000"
+      # 显式声明单 worker（与 Dockerfile CMD 一致，双保险）
+      WEB_CONCURRENCY: "1"
+    volumes:
+      - formfit-db:/data/formfit
+      - formfit-uploads:/data/uploads
+      - formfit-backups:/data/backups
+    ports:
+      # 仅绑定到本机，由 1Panel/Nginx 反代并终止 TLS；不要直接暴露 0.0.0.0
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  formfit-db:
+  formfit-uploads:
+  formfit-backups:
