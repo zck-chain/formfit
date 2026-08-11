@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agent import planner, qwen_vl_client
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_pro_membership
 from app.core.config import settings
 from app.db.session import get_db
 from app.models import (
@@ -64,7 +64,10 @@ def update_profile(
 
 
 # ---------- 体态拍照评估 ----------
-@router.post("/assess")
+@router.post(
+    "/assess",
+    dependencies=[Depends(require_pro_membership("assess"))],
+)
 async def assess_body(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -130,7 +133,11 @@ async def assess_body(
 
 
 # ---------- 计划生成 ----------
-@router.post("/plans/generate", response_model=PlanOut)
+@router.post(
+    "/plans/generate",
+    response_model=PlanOut,
+    dependencies=[Depends(require_pro_membership("generate_plan"))],
+)
 async def generate_plan(
     body: PlanGenerateIn,
     db: Session = Depends(get_db),
