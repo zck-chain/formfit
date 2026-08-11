@@ -1,5 +1,6 @@
 """应用配置：从 .env 读取，集中管理。"""
 import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -80,6 +81,9 @@ class Settings(BaseSettings):
     app_host: str = "127.0.0.1"
     app_port: int = 8000
 
+    # 日志级别（DEBUG/INFO/WARNING/ERROR），生产默认 INFO
+    log_level: str = "INFO"
+
     # 业务
     app_name: str = "FormFit"
     upload_dir: Path = UPLOAD_DIR
@@ -142,6 +146,33 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env.strip().lower() == "production"
+
+    @property
+    def is_sqlite(self) -> bool:
+        return self.database_url.strip().startswith("sqlite")
+
+    @property
+    def payment_channel_list(self) -> list[str]:
+        """解析 PAYMENT_CHANNELS 为小写渠道名列表。"""
+        return [
+            c.strip().lower()
+            for c in self.payment_channels.split(",")
+            if c.strip()
+        ]
+
+    @property
+    def worker_count(self) -> int:
+        """uvicorn worker 数：读 WEB_CONCURRENCY（uvicorn 官方约定的环境变量）。
+
+        未设置时视为 1。SQLite 生产部署的硬约束是单 worker（见 validate_deployment）。
+        """
+        raw = os.environ.get("WEB_CONCURRENCY", "").strip()
+        if not raw:
+            return 1
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return 1
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -210,11 +241,45 @@ def validate_security_settings(settings: Settings) -> None:
         logger.warning("安全配置提示：%s", p)
 
 
+def validate_deployment_settings(settings: Settings) -> None:
+    """生产环境部署形态校验：SQLite 单 worker、禁用沙箱支付、禁用内存库。
+
+    这些是 v1 单容器/单实例低容量目标的硬约束；任何多 worker/多副本需求必须重新评审。
+    """
+    if not settings.is_production:
+        return
+
+    problems: list[str] = []
+
+    # SQLite 不支持多进程并发写：必须单 worker、单容器。
+    if settings.is_sqlite and settings.worker_count > 1:
+        problems.append(
+            "SQLite 生产部署仅允许单 worker/单容器（WEB_CONCURRENCY 必须为 1）；"
+            "多 worker 会导致写锁竞争与数据库损坏"
+        )
+
+    # 内存库在容器重启后数据全丢，生产绝不允许。
+    if ":memory:" in settings.database_url:
+        problems.append("生产环境不得使用 SQLite 内存库（:memory:），请挂载持久卷")
+
+    # 沙箱支付仅供本地联调，生产启用会产生无法真实结算的订单。
+    if "sandbox" in settings.payment_channel_list:
+        problems.append(
+            "生产环境不得启用 sandbox 支付渠道；真实凭证就绪前请把 PAYMENT_CHANNELS 置空"
+        )
+
+    if problems:
+        raise RuntimeError(
+            "生产环境部署校验失败，拒绝启动：\n  - " + "\n  - ".join(problems)
+        )
+
+
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     validate_security_settings(settings)
+    validate_deployment_settings(settings)
     return settings
 
 
