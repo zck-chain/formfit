@@ -1,15 +1,14 @@
 """评估、档案、计划生成、训练记录接口（需登录）。"""
-import shutil
 import uuid
-from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agent import planner, qwen_vl_client
 from app.api.deps import get_current_user, require_pro_membership
 from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.models import (
     BodyAssessment,
@@ -27,10 +26,12 @@ from app.schemas.fitness import (
     WorkoutLogIn,
     WorkoutLogOut,
 )
+from app.utils.images import ImageValidationError, validate_and_prepare
 
 router = APIRouter(prefix="/api/fitness", tags=["fitness"])
 
-ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
+# 仅作为客户端声明的快速过滤；真实类型以 magic bytes/Pillow 校验为准
+DECLARED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
 
 
 # ---------- 用户档案 ----------
@@ -68,7 +69,9 @@ def update_profile(
     "/assess",
     dependencies=[Depends(require_pro_membership("assess"))],
 )
+@limiter.limit(settings.rate_limit_assess)
 async def assess_body(
+    request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
     file: UploadFile = File(...),
@@ -77,15 +80,21 @@ async def assess_body(
     age: int | None = Form(None),
     gender: str | None = Form(None),
 ):
-    if file.content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail="仅支持 JPG/PNG/WebP 图片")
+    # 1) 客户端声明的 content_type 快速过滤（真实类型下面用 Pillow 校验）
+    if file.content_type and file.content_type not in DECLARED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="仅支持 JPG/PNG/WebP/HEIC 图片")
 
-    # 保存上传文件
-    ext = Path(file.filename or "img.jpg").suffix or ".jpg"
+    # 2) 读取并限制大小（StreamingFiles 不预先知道大小，这里一次性读入内存）
+    raw = await file.read()
+    try:
+        data, ext, mime = validate_and_prepare(raw, file.content_type)
+    except ImageValidationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+    # 3) 落盘（隐私路径：用户id + 随机名，不保留原始文件名）
     save_name = f"{user.id}_{uuid.uuid4().hex}{ext}"
     save_path = settings.upload_dir / save_name
-    with save_path.open("wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_path.write_bytes(data)
 
     # 若表单带了身体数据，顺手更新档案
     profile = _get_or_create_profile(db, user)
@@ -138,7 +147,9 @@ async def assess_body(
     response_model=PlanOut,
     dependencies=[Depends(require_pro_membership("generate_plan"))],
 )
+@limiter.limit(settings.rate_limit_generate_plan)
 async def generate_plan(
+    request: Request,
     body: PlanGenerateIn,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),

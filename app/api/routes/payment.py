@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.db.session import get_db
 from app.models import User
 from app.payment import supported_channels
@@ -55,7 +57,9 @@ def list_channels():
 
 
 @router.post("/orders", response_model=OrderOut)
+@limiter.limit(settings.rate_limit_create_order)
 def create_order(
+    request: Request,
     body: OrderCreateIn,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),

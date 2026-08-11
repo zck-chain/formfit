@@ -1,9 +1,11 @@
 """鉴权路由：注册、登录、当前用户。"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_db
 from app.models import Membership, User
@@ -21,7 +23,8 @@ def _issue_token(db: Session, user: User) -> TokenOut:
 
 
 @router.post("/register", response_model=TokenOut)
-def register(body: RegisterIn, db: Session = Depends(get_db)):
+@limiter.limit(settings.rate_limit_register)
+def register(request: Request, body: RegisterIn, db: Session = Depends(get_db)):
     existing = db.scalar(select(User).where(User.email == body.email))
     if existing:
         raise HTTPException(status_code=400, detail="该邮箱已注册")
@@ -38,7 +41,8 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenOut)
-def login(body: LoginIn, db: Session = Depends(get_db)):
+@limiter.limit(settings.rate_limit_login)
+def login(request: Request, body: LoginIn, db: Session = Depends(get_db)):
     user = db.scalar(select(User).where(User.email == body.email))
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="邮箱或密码错误")

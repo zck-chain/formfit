@@ -24,3 +24,5 @@ httpx>=0.28.1
 # 工具
 python-dotenv>=1.0.1
 Pillow>=11.2.0                      # 上传图片校验/处理
+pillow-heif>=0.16.0                # HEIC/HEIF 解码（iPhone 照片转 JPEG）
+slowapi>=0.1.9                     # 应用层限流（注册/登录/AI 接口兜底）
