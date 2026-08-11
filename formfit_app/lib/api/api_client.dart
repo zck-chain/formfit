@@ -19,10 +19,15 @@ class ApiException implements Exception {
   final int? statusCode;
   final String message;
 
-  /// 后端在 402/403 body 中返回的机器可读错误码，如 `pro_required`。
+  /// 后端在 402/403 body 中返回的机器可读错误码，如 `pro_required` /
+  /// `quota_exhausted`。
   final String? code;
 
-  ApiException(this.message, {this.statusCode, this.code});
+  /// 后端返回的完整结构化 detail（HTTPException 的 detail 为对象时）。
+  /// 402 `quota_exhausted` 时含 `feature` / `limit` / `used` / `reset_at`。
+  final Map<String, dynamic>? data;
+
+  ApiException(this.message, {this.statusCode, this.code, this.data});
 
   /// 是否为 PRO 门控：HTTP 402，或 403 且 body 标记 `pro_required`。
   /// 命中时前端应弹出付费墙而非报错。
@@ -31,6 +36,9 @@ class ApiException implements Exception {
     if (statusCode == 403 && code == 'pro_required') return true;
     return false;
   }
+
+  /// 免费用户本月额度已用尽（402 `quota_exhausted`）。
+  bool get isQuotaExhausted => statusCode == 402 && code == 'quota_exhausted';
 
   @override
   String toString() => message;
@@ -60,13 +68,14 @@ final dioProvider = Provider<Dio>((ref) {
       onError: (DioException e, handler) {
         final message = _extractMessage(e);
         final code = _extractCode(e);
+        final data = _extractDetailMap(e);
         return handler.reject(
           DioException(
             requestOptions: e.requestOptions,
             response: e.response,
             type: e.type,
             error: ApiException(message,
-                statusCode: e.response?.statusCode, code: code),
+                statusCode: e.response?.statusCode, code: code, data: data),
           ),
         );
       },
@@ -75,9 +84,23 @@ final dioProvider = Provider<Dio>((ref) {
   return dio;
 });
 
+/// 当后端 `detail` 是一个对象（如 402 quota_exhausted）时返回其 Map 视图。
+Map<String, dynamic>? _extractDetailMap(DioException e) {
+  final data = e.response?.data;
+  if (data is Map && data['detail'] is Map) {
+    return (data['detail'] as Map).cast<String, dynamic>();
+  }
+  return null;
+}
+
 String? _extractCode(DioException e) {
   final data = e.response?.data;
   if (data is Map) {
+    // 402/403 结构化 detail：{"detail": {"error": "quota_exhausted", ...}}
+    final detail = data['detail'];
+    if (detail is Map && detail['error'] != null) {
+      return detail['error'].toString();
+    }
     final code = data['error'] ?? data['code'];
     if (code != null) return code.toString();
   }
@@ -87,9 +110,13 @@ String? _extractCode(DioException e) {
 String _extractMessage(DioException e) {
   final data = e.response?.data;
   if (data is Map) {
-    if (data['detail'] is String) return data['detail'];
-    if (data['detail'] is List && (data['detail'] as List).isNotEmpty) {
-      final first = (data['detail'] as List).first;
+    final detail = data['detail'];
+    if (detail is String) return detail;
+    if (detail is Map && detail['message'] != null) {
+      return detail['message'].toString();
+    }
+    if (detail is List && detail.isNotEmpty) {
+      final first = detail.first;
       if (first is Map && first['msg'] != null) return first['msg'].toString();
     }
     if (data['message'] != null) return data['message'].toString();

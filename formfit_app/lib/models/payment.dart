@@ -195,6 +195,57 @@ class OrderStatus {
       );
 }
 
+/// 后端配额功能标识，与 `app/api/deps.py` 的 PRO_FEATURES 对齐。
+class QuotaFeatures {
+  QuotaFeatures._();
+  static const assess = 'assess';
+  static const generatePlan = 'generate_plan';
+
+  /// 功能标识 → 中文展示名。
+  static const labels = {
+    assess: '体态评估',
+    generatePlan: 'AI 计划',
+  };
+}
+
+/// 单个 PRO 功能的月度免费额度状态（`GET /api/membership` 的 `quota.<feature>`）。
+///
+/// PRO 用户 [remaining] 为 `null`（不限次）；免费用户为剩余次数。
+class Quota {
+  final String feature;
+  final int limit;
+  final int used;
+  final int? remaining;
+  final DateTime? resetAt;
+
+  const Quota({
+    required this.feature,
+    required this.limit,
+    required this.used,
+    required this.remaining,
+    this.resetAt,
+  });
+
+  /// PRO 不限次（remaining 为 null）。
+  bool get isUnlimited => remaining == null;
+
+  /// 是否已用尽（仅对免费档有意义）。
+  bool get isExhausted => remaining != null && remaining! <= 0;
+
+  /// 中文展示名。
+  String get label => QuotaFeatures.labels[feature] ?? feature;
+
+  factory Quota.fromJson(Map<String, dynamic> json) => Quota(
+        feature: json['feature']?.toString() ?? '',
+        limit: (json['limit'] as num?)?.toInt() ?? 0,
+        used: (json['used'] as num?)?.toInt() ?? 0,
+        remaining: (json['remaining'] as num?)?.toInt(),
+        resetAt: json['reset_at'] != null
+            ? DateTime.tryParse(json['reset_at'].toString())
+            : null,
+      );
+}
+
 /// 当前用户会员态（`GET /api/membership`）。
 class Membership {
   final String plan; // free / pro
@@ -206,6 +257,10 @@ class Membership {
   /// PRO 功能是否被锁定——前端据此决定是否弹付费墙。
   final bool featuresLocked;
 
+  /// 各 PRO 功能的本月免费额度（`assess` / `generate_plan`）。
+  /// PRO 用户各项 remaining 为 null；免费用户为剩余次数。
+  final Map<String, Quota> quota;
+
   const Membership({
     required this.plan,
     required this.isActive,
@@ -213,7 +268,11 @@ class Membership {
     this.expireAt,
     this.paymentChannel,
     required this.featuresLocked,
+    this.quota = const {},
   });
+
+  /// 取指定功能的额度；后端未返回时为 null（按「无免费额度」处理）。
+  Quota? quotaFor(String feature) => quota[feature];
 
   /// 免费用户的默认态。
   static const free = Membership(
@@ -223,14 +282,27 @@ class Membership {
     featuresLocked: true,
   );
 
-  factory Membership.fromJson(Map<String, dynamic> json) => Membership(
-        plan: json['plan']?.toString() ?? 'free',
-        isActive: json['is_active'] == true,
-        isPro: json['is_pro'] == true,
-        expireAt: json['expire_at'] != null
-            ? DateTime.tryParse(json['expire_at'].toString())
-            : null,
-        paymentChannel: json['payment_channel']?.toString(),
-        featuresLocked: json['features_locked'] == true,
-      );
+  factory Membership.fromJson(Map<String, dynamic> json) {
+    final rawQuota = json['quota'];
+    final quota = <String, Quota>{};
+    if (rawQuota is Map) {
+      rawQuota.forEach((key, value) {
+        if (value is Map) {
+          quota[key.toString()] =
+              Quota.fromJson({...value.cast<String, dynamic>(), 'feature': key});
+        }
+      });
+    }
+    return Membership(
+      plan: json['plan']?.toString() ?? 'free',
+      isActive: json['is_active'] == true,
+      isPro: json['is_pro'] == true,
+      expireAt: json['expire_at'] != null
+          ? DateTime.tryParse(json['expire_at'].toString())
+          : null,
+      paymentChannel: json['payment_channel']?.toString(),
+      featuresLocked: json['features_locked'] == true,
+      quota: quota,
+    );
+  }
 }
