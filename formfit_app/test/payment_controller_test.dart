@@ -178,5 +178,41 @@ void main() {
       expect(ok, isFalse);
       expect(c.read(paymentControllerProvider).stage, PurchaseStage.error);
     });
+
+    test('alipay 渠道未就绪：不下单，提示筹备中，无崩溃', () async {
+      final repo = FakeApiRepository()
+        ..channels = const ['sandbox', 'alipay', 'wechat', 'apple'];
+      final c = _container(repo: repo);
+      await _waitForLoad();
+
+      final controller = c.read(paymentControllerProvider.notifier);
+      controller.selectChannel('alipay');
+      await _waitForLoad();
+
+      final ok = await controller.purchase();
+
+      expect(ok, isFalse);
+      expect(repo.createOrderCalls, 0);
+      final state = c.read(paymentControllerProvider);
+      expect(state.stage, PurchaseStage.idle);
+      expect(state.message, contains('筹备中'));
+    });
+
+    test('wechat 渠道未就绪：不下单，提示筹备中', () async {
+      final repo = FakeApiRepository()
+        ..channels = const ['sandbox', 'wechat'];
+      final c = _container(repo: repo);
+      await _waitForLoad();
+
+      final controller = c.read(paymentControllerProvider.notifier);
+      controller.selectChannel('wechat');
+      await _waitForLoad();
+
+      final ok = await controller.purchase();
+
+      expect(ok, isFalse);
+      expect(repo.createOrderCalls, 0);
+      expect(c.read(paymentControllerProvider).message, contains('筹备中'));
+    });
   });
 }
