@@ -239,17 +239,21 @@ def test_upload_heic_transcoded_to_jpeg():
 # ============================================================
 def test_register_rate_limit_returns_429(client):
     # 默认阈值 10/minute；连续注册超过阈值应得到 429
-    statuses = []
+    responses = []
     for i in range(12):
-        r = client.post(
-            "/api/auth/register",
-            json={"email": f"u{i}@t.com", "password": "secret123", "nickname": "t"},
+        responses.append(
+            client.post(
+                "/api/auth/register",
+                json={"email": f"u{i}@t.com", "password": "secret123", "nickname": "t"},
+            )
         )
-        statuses.append(r.status_code)
+    statuses = [r.status_code for r in responses]
     assert 429 in statuses, statuses
-    # 429 响应应包含 Retry-After
-    r429 = next(s for s in statuses if s == 429)
-    assert r429 == 429
+    # 429 响应必须携带 Retry-After（秒数），固化与客户端的退避契约
+    blocked = next(r for r in responses if r.status_code == 429)
+    retry_after = blocked.headers.get("Retry-After")
+    assert retry_after is not None
+    assert retry_after.isdigit() and int(retry_after) > 0
 
 
 def test_login_rate_limit_returns_429(client):
@@ -258,14 +262,20 @@ def test_login_rate_limit_returns_429(client):
         "/api/auth/register",
         json={"email": "ratelog@t.com", "password": "secret123", "nickname": "t"},
     )
-    statuses = []
+    responses = []
     for _ in range(22):
-        r = client.post(
-            "/api/auth/login",
-            json={"email": "ratelog@t.com", "password": "wrong-pass"},
+        responses.append(
+            client.post(
+                "/api/auth/login",
+                json={"email": "ratelog@t.com", "password": "wrong-pass"},
+            )
         )
-        statuses.append(r.status_code)
+    statuses = [r.status_code for r in responses]
     assert 429 in statuses, statuses
+    blocked = next(r for r in responses if r.status_code == 429)
+    retry_after = blocked.headers.get("Retry-After")
+    assert retry_after is not None
+    assert retry_after.isdigit() and int(retry_after) > 0
 
 
 # ============================================================
@@ -311,3 +321,113 @@ def test_admin_secret_independent_from_jwt(monkeypatch):
     monkeypatch.setattr(cfg.settings, "admin_session_secret", "independent-key-xyz")
     monkeypatch.setattr(cfg.settings, "jwt_secret", "jwt-secret-abc")
     assert cfg.settings.admin_secret_key() == "independent-key-xyz"
+
+
+# ============================================================
+# 6. XFF 信任收敛：TRUSTED_PROXY_ENABLED 控制是否采信 X-Forwarded-For
+# ============================================================
+class _StubClient:
+    host = "203.0.113.10"
+
+
+class _StubRequest:
+    """最小请求桩：headers 字典 + client.host，供限流 key 函数直接调用。"""
+
+    def __init__(self, headers):
+        self.headers = headers
+        self.client = _StubClient()
+
+
+def test_client_ip_ignores_xff_when_trusted_proxy_disabled(monkeypatch):
+    from app.core import rate_limit
+
+    monkeypatch.setattr(rate_limit.settings, "trusted_proxy_enabled", False)
+    req = _StubRequest({"x-forwarded-for": "1.2.3.4, 5.6.7.8"})
+    # 直连部署：伪造的 XFF 不应影响限流 key，用 TCP 直连地址
+    assert rate_limit.client_ip(req) == "203.0.113.10"
+
+
+def test_client_ip_uses_xff_when_trusted_proxy_enabled(monkeypatch):
+    from app.core import rate_limit
+
+    monkeypatch.setattr(rate_limit.settings, "trusted_proxy_enabled", True)
+    req = _StubRequest({"x-forwarded-for": "1.2.3.4, 5.6.7.8"})
+    # 可信代理后：取 XFF 首个 IP
+    assert rate_limit.client_ip(req) == "1.2.3.4"
+    # 未带 XFF 时回退直连地址
+    assert rate_limit.client_ip(_StubRequest({})) == "203.0.113.10"
+
+
+def test_register_rate_limit_not_bypassed_by_forged_xff(client):
+    # 默认 trusted_proxy_enabled=false：每个请求轮换不同 XFF，
+    # 仍按直连地址（testclient）计数，超过阈值必须 429。
+    statuses = []
+    for i in range(12):
+        r = client.post(
+            "/api/auth/register",
+            json={"email": f"xff{i}@t.com", "password": "secret123", "nickname": "t"},
+            headers={"X-Forwarded-For": f"10.0.0.{i + 1}"},
+        )
+        statuses.append(r.status_code)
+    assert 429 in statuses, statuses
+
+
+def test_register_rate_limit_honors_xff_when_trusted(client, monkeypatch):
+    from app.core import rate_limit
+
+    monkeypatch.setattr(rate_limit.settings, "trusted_proxy_enabled", True)
+    # 每个请求使用不同可信 XFF 客户端 IP，各自独立计数 → 全部放行
+    statuses = []
+    for i in range(12):
+        r = client.post(
+            "/api/auth/register",
+            json={"email": f"txff{i}@t.com", "password": "secret123", "nickname": "t"},
+            headers={"X-Forwarded-For": f"10.0.0.{i + 1}"},
+        )
+        statuses.append(r.status_code)
+    assert 429 not in statuses, statuses
+    assert all(s == 200 for s in statuses)
+
+
+# ============================================================
+# 7. 已鉴权接口按 user 维度限流（NAT 下不误伤，单用户滥用命中 429）
+# ============================================================
+def test_user_or_ip_key_prefers_user_id():
+    from app.core.rate_limit import user_or_ip_key
+    from app.core.security import create_access_token
+
+    token = create_access_token(42)
+    req = _StubRequest({"authorization": f"Bearer {token}"})
+    assert user_or_ip_key(req) == "user:42"
+    # 无凭据 / 无效凭据回退到 IP 维度
+    assert user_or_ip_key(_StubRequest({})) == "203.0.113.10"
+    bad = _StubRequest({"authorization": "Bearer not-a-real-token"})
+    assert user_or_ip_key(bad) == "203.0.113.10"
+
+
+def test_authenticated_endpoint_rate_limits_per_user_not_ip(client, register_user):
+    """默认阈值 30/minute。同 IP 下：A 用尽配额后 B 仍可用；A 再请求 429。"""
+    headers_a, _ = register_user(email="alice@t.com", password="secret123")
+    headers_b, _ = register_user(email="bob@t.com", password="secret123")
+
+    payload = {"plan_code": "pro_monthly", "channel": "sandbox"}
+
+    # A 连续下单 31 次：前 30 放行，第 31 次 429（即便轮换伪造 XFF 也无效）
+    statuses_a = []
+    for i in range(30):
+        statuses_a.append(
+            client.post("/api/payment/orders", json=payload, headers=headers_a).status_code
+        )
+    forged = client.post(
+        "/api/payment/orders",
+        json=payload,
+        headers={**headers_a, "X-Forwarded-For": "8.8.8.8"},
+    ).status_code
+    statuses_a.append(forged)
+
+    assert statuses_a.count(200) == 30, statuses_a
+    assert forged == 429, statuses_a
+
+    # B 与 A 来自同一测试客户端（同一 IP），不应被 A 的配额误伤
+    resp_b = client.post("/api/payment/orders", json=payload, headers=headers_b)
+    assert resp_b.status_code == 200, resp_b.text
