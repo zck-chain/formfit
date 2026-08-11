@@ -1,0 +1,54 @@
+# ===== 版本控制 / CI =====
+.git/
+.gitattributes
+.multica/
+.claude/
+.agent_context/
+.run-logs/
+.pytest_cache/
+.description.md
+
+# ===== 本地虚拟环境与 Python 缓存 =====
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ===== 绝不打包进镜像：环境变量与密钥 =====
+.env
+.env.*
+!.env.example
+
+# ===== 本地数据库（生产用持久卷，绝不进镜像）=====
+*.db
+*.db-shm
+*.db-wal
+*.sqlite3
+
+# ===== 本地用户上传（生产用持久卷 /data/uploads）=====
+app/static/uploads/*
+!app/static/uploads/.gitkeep
+
+# ===== Flutter 客户端（不属于后端镜像）=====
+formfit_app/
+
+# ===== 测试 / 文档（运行期不需要）=====
+tests/
+docs/
+*.md
+!README.md
+
+# ===== IDE / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+*.swp
+*.log
+logs/
+
+# ===== Docker 自身 =====
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
