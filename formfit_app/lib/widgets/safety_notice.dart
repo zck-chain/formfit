@@ -74,15 +74,16 @@ class SafetyNotice extends StatelessWidget {
             ? [BoxShadow(color: color.withValues(alpha: .18), blurRadius: 16)]
             : null,
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // 左侧强调色条
-          Container(
-            width: strong ? 4 : 3,
-            color: color,
-          ),
-          Expanded(
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 左侧强调色条
+            Container(
+              width: strong ? 4 : 3,
+              color: color,
+            ),
+            Expanded(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
               child: Column(
@@ -127,6 +128,7 @@ class SafetyNotice extends StatelessWidget {
             ),
           ),
         ],
+      ),
       ),
     );
   }

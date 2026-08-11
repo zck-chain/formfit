@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../providers/auth_provider.dart';
+import '../../providers/membership_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../features/paywall/paywall_screen.dart';
 
 class ProfileTab extends ConsumerWidget {
   const ProfileTab({super.key});
@@ -11,8 +13,10 @@ class ProfileTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider);
+    final membership = ref.watch(membershipProvider).valueOrNull;
     final user = auth.user;
     final profile = auth.profile;
+    final isPro = membership?.isPro ?? false;
 
     return Scaffold(
       appBar: AppBar(title: const Text('我的')),
@@ -95,13 +99,17 @@ class ProfileTab extends ConsumerWidget {
             onTap: () => context.push('/profile'),
           ),
           _MenuItem(
-            icon: Icons.credit_card_outlined,
+            icon: isPro ? Icons.verified_rounded : Icons.credit_card_outlined,
             label: '会员中心',
-            trailing: const _ProBadge(),
+            trailing: _ProBadge(active: isPro),
             onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('会员支付功能开发中')),
-              );
+              PaywallScreen.push<bool>(context, source: 'profile').then((ok) {
+                if (ok == true && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('PRO 已开通')),
+                  );
+                }
+              });
             },
           ),
           _MenuItem(
@@ -189,18 +197,23 @@ class _MenuItem extends StatelessWidget {
 }
 
 class _ProBadge extends StatelessWidget {
-  const _ProBadge();
+  final bool active;
+  const _ProBadge({this.active = false});
   @override
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        gradient: AppColors.primaryGradient,
+        gradient: active ? AppColors.energyGradient : null,
+        color: active ? null : AppColors.cardHover,
         borderRadius: BorderRadius.circular(6),
+        border: active ? null : Border.all(color: AppColors.borderBright),
       ),
-      child: const Text('PRO',
+      child: Text(active ? 'PRO' : 'FREE',
           style: TextStyle(
-              color: Colors.black, fontSize: 11, fontWeight: FontWeight.w700)),
+              color: active ? Colors.black : AppColors.textSecondary,
+              fontSize: 11,
+              fontWeight: FontWeight.w700)),
     );
   }
 }

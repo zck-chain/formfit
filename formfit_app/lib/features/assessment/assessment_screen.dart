@@ -7,9 +7,11 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../api/repository.dart';
 import '../../models/assessment.dart';
+import '../paywall/pro_gate.dart';
 import '../../providers/auth_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/badges.dart';
+import '../../widgets/safety_notice.dart';
 
 class AssessmentScreen extends ConsumerStatefulWidget {
   const AssessmentScreen({super.key});
@@ -47,14 +49,21 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
       _error = null;
     });
     try {
-      final result = await ref.read(apiRepositoryProvider).assess(
-            image: _image!,
-            heightCm: profile?.heightCm,
-            weightKg: profile?.weightKg,
-            age: profile?.age,
-            gender: profile?.gender,
-          );
-      setState(() => _result = result);
+      final result = await ProGate.run<Assessment>(
+        context,
+        ref,
+        () => ref.read(apiRepositoryProvider).assess(
+              image: _image!,
+              heightCm: profile?.heightCm,
+              weightKg: profile?.weightKg,
+              age: profile?.age,
+              gender: profile?.gender,
+            ),
+        source: '体态评估',
+      );
+      if (result.isSuccess) {
+        setState(() => _result = result.value);
+      }
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -287,24 +296,19 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
           ],
           if (r.safetyNotes != null && r.safetyNotes!.isNotEmpty) ...[
             const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.warning.withValues(alpha: .1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline,
-                      color: AppColors.warning, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(r.safetyNotes!,
-                        style: const TextStyle(
-                            color: AppColors.warning, fontSize: 12)),
-                  ),
-                ],
-              ),
+            SafetyNotice(
+              level: r.isHighRisk
+                  ? SafetyNoticeLevel.danger
+                  : SafetyNoticeLevel.warning,
+              message: r.safetyNotes!,
+              referralText: r.isHighRisk ? r.referralAdvice : null,
+            ),
+          ] else ...[
+            const SizedBox(height: 16),
+            const SafetyNotice(
+              level: SafetyNoticeLevel.info,
+              message: 'AI 评估结果仅供健身参考，不构成医疗诊断。'
+                  '如有持续疼痛或既往伤病史，请在训练前咨询专业医生或物理治疗师。',
             ),
           ],
           const SizedBox(height: 20),

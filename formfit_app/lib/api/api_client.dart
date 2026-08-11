@@ -18,7 +18,20 @@ final tokenStoreProvider = Provider<TokenStore>((ref) => TokenStore());
 class ApiException implements Exception {
   final int? statusCode;
   final String message;
-  ApiException(this.message, {this.statusCode});
+
+  /// 后端在 402/403 body 中返回的机器可读错误码，如 `pro_required`。
+  final String? code;
+
+  ApiException(this.message, {this.statusCode, this.code});
+
+  /// 是否为 PRO 门控：HTTP 402，或 403 且 body 标记 `pro_required`。
+  /// 命中时前端应弹出付费墙而非报错。
+  bool get isProRequired {
+    if (statusCode == 402) return true;
+    if (statusCode == 403 && code == 'pro_required') return true;
+    return false;
+  }
+
   @override
   String toString() => message;
 }
@@ -46,12 +59,14 @@ final dioProvider = Provider<Dio>((ref) {
       onResponse: (response, handler) => handler.next(response),
       onError: (DioException e, handler) {
         final message = _extractMessage(e);
+        final code = _extractCode(e);
         return handler.reject(
           DioException(
             requestOptions: e.requestOptions,
             response: e.response,
             type: e.type,
-            error: ApiException(message, statusCode: e.response?.statusCode),
+            error: ApiException(message,
+                statusCode: e.response?.statusCode, code: code),
           ),
         );
       },
@@ -59,6 +74,15 @@ final dioProvider = Provider<Dio>((ref) {
   );
   return dio;
 });
+
+String? _extractCode(DioException e) {
+  final data = e.response?.data;
+  if (data is Map) {
+    final code = data['error'] ?? data['code'];
+    if (code != null) return code.toString();
+  }
+  return null;
+}
 
 String _extractMessage(DioException e) {
   final data = e.response?.data;
