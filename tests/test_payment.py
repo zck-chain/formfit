@@ -228,6 +228,14 @@ def test_other_user_order_not_visible(client, register_user):
 
 
 # ---------- 恢复购买（沙箱票据）----------
+def _sandbox_receipt(txn_id: str, product_id: str) -> str:
+    msg = f"{txn_id}.{product_id}".encode("utf-8")
+    sig = hmac.new(
+        settings.sandbox_secret.encode("utf-8"), msg, hashlib.sha256
+    ).hexdigest()
+    return f"{txn_id}:{product_id}:{sig}"
+
+
 def test_restore_purchase_sandbox(client, register_user, db_session):
     headers, user = register_user()
     # 沙箱票据 txn_id:product_id:sign
@@ -238,11 +246,7 @@ def test_restore_purchase_sandbox(client, register_user, db_session):
 
     PLAN_CATALOG["pro_monthly"]["provider_product_id"]["sandbox"] = product_id
     try:
-        msg = f"{txn_id}.{product_id}".encode("utf-8")
-        sig = hmac.new(
-            settings.sandbox_secret.encode("utf-8"), msg, hashlib.sha256
-        ).hexdigest()
-        receipt = f"{txn_id}:{product_id}:{sig}"
+        receipt = _sandbox_receipt(txn_id, product_id)
 
         resp = client.post(
             "/api/payment/restore",
@@ -264,6 +268,48 @@ def test_restore_purchase_sandbox(client, register_user, db_session):
         m = db_session.query(Membership).filter_by(user_id=user["id"]).one()
         assert m.is_active is True
         assert m.provider_subscription_id == txn_id
+    finally:
+        PLAN_CATALOG["pro_monthly"]["provider_product_id"].pop("sandbox", None)
+
+
+def test_restore_cross_user_rejected(client, register_user, db_session):
+    """A 用某票据恢复并绑定订阅后，B 用同一票据 restore 必须被拒（越权），
+    且 B 的会员不被开通。"""
+    from app.schemas.payment import PLAN_CATALOG
+
+    h_a, user_a = register_user("a@test.com")
+    h_b, user_b = register_user("b@test.com", password="secret123")
+
+    txn_id = "sb_restore_cross"
+    product_id = "formfit.pro.monthly"
+    PLAN_CATALOG["pro_monthly"]["provider_product_id"]["sandbox"] = product_id
+    try:
+        receipt = _sandbox_receipt(txn_id, product_id)
+
+        # A 正常恢复
+        resp_a = client.post(
+            "/api/payment/restore",
+            json={"channel": "sandbox", "receipt_data": receipt},
+            headers=h_a,
+        )
+        assert resp_a.status_code == 200, resp_a.text
+
+        # B 拿同一票据恢复 -> 验签通过但归属他人，应 401
+        resp_b = client.post(
+            "/api/payment/restore",
+            json={"channel": "sandbox", "receipt_data": receipt},
+            headers=h_b,
+        )
+        assert resp_b.status_code == 401, resp_b.text
+
+        db_session.expire_all()
+        # B 的会员仍为 free、未绑定订阅
+        m_b = db_session.query(Membership).filter_by(user_id=user_b["id"]).one()
+        assert m_b.is_active is False
+        assert m_b.provider_subscription_id is None
+        # 订阅仍只属于 A
+        m_a = db_session.query(Membership).filter_by(user_id=user_a["id"]).one()
+        assert m_a.provider_subscription_id == txn_id
     finally:
         PLAN_CATALOG["pro_monthly"]["provider_product_id"].pop("sandbox", None)
 

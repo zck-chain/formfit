@@ -255,12 +255,17 @@ def restore_purchase(db: Session, user: User, channel: str, receipt_data: str) -
                 Membership.provider_subscription_id == orig_id,
             )
         )
-        if existing_m and existing_m.is_active:
-            order = db.scalar(
-                select(Order).where(Order.order_no == existing_m.order_id)
-            )
-            if order:
-                return order
+        if existing_m:
+            # 该订阅已绑定到其他用户：票据归属他人，拒绝（防止越权恢复/信息泄露）。
+            # 无论其会员是否 active 都拒绝，也避免命中 provider_subscription_id 唯一约束。
+            if existing_m.user_id != user.id:
+                raise PaymentVerifyError("该票据属于其他用户")
+            if existing_m.is_active:
+                order = db.scalar(
+                    select(Order).where(Order.order_no == existing_m.order_id)
+                )
+                if order:
+                    return order
 
     # 幂等 2：该渠道交易号已落单
     order = db.scalar(
