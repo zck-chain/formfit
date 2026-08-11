@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.agent import planner, qwen_vl_client
 from app.api.deps import get_current_user, require_pro_membership
 from app.core.config import settings
-from app.core.rate_limit import limiter
+from app.core.rate_limit import limiter, user_or_ip_key
 from app.db.session import get_db
 from app.models import (
     BodyAssessment,
@@ -69,7 +69,7 @@ def update_profile(
     "/assess",
     dependencies=[Depends(require_pro_membership("assess"))],
 )
-@limiter.limit(settings.rate_limit_assess)
+@limiter.limit(settings.rate_limit_assess, key_func=user_or_ip_key)
 async def assess_body(
     request: Request,
     db: Session = Depends(get_db),
@@ -147,7 +147,7 @@ async def assess_body(
     response_model=PlanOut,
     dependencies=[Depends(require_pro_membership("generate_plan"))],
 )
-@limiter.limit(settings.rate_limit_generate_plan)
+@limiter.limit(settings.rate_limit_generate_plan, key_func=user_or_ip_key)
 async def generate_plan(
     request: Request,
     body: PlanGenerateIn,

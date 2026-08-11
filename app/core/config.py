@@ -86,6 +86,9 @@ class Settings(BaseSettings):
 
     # ---- 限流（应用层兜底，单位：次/时间窗口）----
     # 格式 "N/period"，period 如 second/minute/hour/day。
+    # 是否部署在可信反向代理之后：仅当为 true 时才采信 X-Forwarded-For
+    # 取客户端 IP；否则一律用直连地址，防止客户端伪造/轮换 XFF 绕过限流。
+    trusted_proxy_enabled: bool = False
     rate_limit_register: str = "10/minute"
     rate_limit_login: str = "20/minute"
     rate_limit_assess: str = "30/minute"
