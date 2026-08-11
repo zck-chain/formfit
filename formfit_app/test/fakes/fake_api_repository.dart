@@ -31,6 +31,44 @@ class FakeApiRepository extends ApiRepository {
 
   List<String> channels = const ['sandbox', 'apple'];
 
+  /// 会员态（含共享额度），测试可覆盖以模拟 free/PRO 与配额。
+  Membership membership = const Membership(
+    plan: 'pro',
+    isActive: true,
+    isPro: true,
+    featuresLocked: false,
+    quota: Quota(
+      limit: 5,
+      used: 0,
+      remaining: null, // PRO 不限次
+    ),
+  );
+
+  /// 构造一个「免费档、共享池剩余 N 次」的会员态。
+  void useFreeMembership({
+    int remaining = 2,
+    int limit = 5,
+    int assessUsed = 1,
+    int planUsed = 1,
+  }) {
+    final used = limit - remaining;
+    membership = Membership(
+      plan: 'free',
+      isActive: false,
+      isPro: false,
+      featuresLocked: true,
+      quota: Quota(
+        limit: limit,
+        used: used,
+        remaining: remaining,
+        breakdown: {
+          QuotaFeatures.assess: assessUsed,
+          QuotaFeatures.generatePlan: planUsed,
+        },
+      ),
+    );
+  }
+
   /// createPaymentOrder 后每次查询返回的状态序列，用于驱动轮询。
   List<OrderStatus> orderStatusSequence = const [];
   int _orderQueryCount = 0;
@@ -137,12 +175,7 @@ class FakeApiRepository extends ApiRepository {
   }
 
   @override
-  Future<Membership> getMembership() async => const Membership(
-        plan: 'pro',
-        isActive: true,
-        isPro: true,
-        featuresLocked: false,
-      );
+  Future<Membership> getMembership() async => membership;
 
   OrderStatus _fulfilled(String orderNo) => OrderStatus(
         orderNo: orderNo,

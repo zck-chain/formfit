@@ -5,10 +5,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../api/repository.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/membership_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/cyber/cyber_background.dart';
 import '../../widgets/cyber/glow_button.dart';
 import '../../widgets/cyber/hud_card.dart';
+import '../../widgets/quota_panel.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -28,10 +30,13 @@ class HomeScreen extends ConsumerWidget {
             backgroundColor: AppColors.card,
             onRefresh: () async {
               // 计划列表由 PlanTab.plansProvider（autoDispose）在切回时自行刷新；
-              // 这里只刷新用户档案。
+              // 这里刷新用户档案与会员额度（评估/计划成功入账后会更新）。
               try {
                 final p = await ref.read(apiRepositoryProvider).getProfile();
                 ref.read(authProvider.notifier).saveProfile(p);
+              } catch (_) {}
+              try {
+                await ref.read(membershipProvider.notifier).refresh();
               } catch (_) {}
             },
             child: ListView(
@@ -43,6 +48,8 @@ class HomeScreen extends ConsumerWidget {
                 _heroCard(profile, context),
                 const SizedBox(height: 18),
                 _quickActions(context),
+                const SizedBox(height: 18),
+                const QuotaPanel(),
                 const SizedBox(height: 26),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20),
