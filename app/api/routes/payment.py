@@ -24,7 +24,7 @@ from app.schemas.payment import (
     RestoreIn,
 )
 from app.services import payment_service
-from app.services.payment_service import PaymentError
+from app.services.payment_service import PaymentConflictError, PaymentError
 
 logger = logging.getLogger(__name__)
 
@@ -141,11 +141,18 @@ async def payment_callback(
     try:
         payment_service.handle_callback(db, channel, headers, body)
     except PaymentVerifyError as exc:
-        # 验签失败：返回 401，渠道通常不会重试（也不应成功）；安全记录
+        # 验签失败：返回 401，渠道通常不会重试（也不应成功）。
+        # 审计事件已在 service 层写入，这里不重复记录，也不回显签名/回调细节。
         logger.warning("支付回调验签失败 channel=%s err=%s", channel, exc)
         raise HTTPException(status_code=401, detail="invalid signature") from exc
+    except PaymentConflictError as exc:
+        # 同渠道交易号核销到不同订单/用户：安全失败（不发货），返回 409 留待人工对账。
+        # 审计事件已在 service 层写入。
+        logger.warning("支付回调交易号冲突 channel=%s err=%s", channel, exc)
+        raise HTTPException(status_code=409, detail="transaction conflict") from exc
     except PaymentError as exc:
-        # 订单不存在等：返回 4xx，避免渠道无意义重放；但记录便于排查
+        # 订单不存在、金额/币种不一致等：返回 4xx，避免渠道无意义重放。
+        # 审计事件已在 service 层写入。
         logger.warning("支付回调处理失败 channel=%s err=%s", channel, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
