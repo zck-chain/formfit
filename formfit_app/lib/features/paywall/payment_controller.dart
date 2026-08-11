@@ -87,6 +87,26 @@ class PaymentState {
 final orderPollerProvider = Provider<OrderPoller>(
     (ref) => defaultOrderPoller(ref.read(apiRepositoryProvider)));
 
+/// 前端已实现完整支付链路的渠道。
+///
+/// `sandbox` 可完整联调；`apple` 走 StoreKit。`alipay` / `wechat` 的真实
+/// 客户端支付能力需引入对应 Flutter SDK 插件并申请商户凭证，当前阶段仅展示入口，
+/// 点击给出「筹备中」提示，详见交付评论的跟进项。
+const clientReadyPaymentChannels = {'sandbox', 'apple'};
+
+/// 渠道是否已具备客户端支付能力。
+bool isClientChannelReady(String channel) =>
+    clientReadyPaymentChannels.contains(channel);
+
+/// 渠道中文名。
+String paymentChannelLabel(String channel) => switch (channel) {
+      'sandbox' => '沙箱联调',
+      'apple' => 'App Store',
+      'alipay' => '支付宝',
+      'wechat' => '微信支付',
+      _ => channel,
+};
+
 class PaymentController extends StateNotifier<PaymentState> {
   PaymentController(this._ref) : super(const PaymentState()) {
     load();
@@ -161,6 +181,14 @@ class PaymentController extends StateNotifier<PaymentState> {
   Future<bool> purchase() async {
     final plan = state.selectedPlan;
     if (plan == null) return false;
+    // alipay/wechat 凭证与原生插件未就绪：明确提示，不发起下单、不假成功。
+    if (!isClientChannelReady(state.channel)) {
+      state = state.copyWith(
+        stage: PurchaseStage.idle,
+        message: '${paymentChannelLabel(state.channel)}支付筹备中，即将上线，敬请期待',
+      );
+      return false;
+    }
     state = state.copyWith(
       stage: PurchaseStage.processing,
       message: null,

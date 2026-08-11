@@ -8,6 +8,7 @@ import '../../widgets/cyber/glow_button.dart';
 import '../../widgets/cyber/hud_card.dart';
 import '../../widgets/safety_notice.dart';
 import 'payment_controller.dart';
+import 'pro_gate.dart';
 
 /// 付费墙（PRO 升级页）。
 ///
@@ -16,13 +17,21 @@ import 'payment_controller.dart';
 class PaywallScreen extends ConsumerWidget {
   /// 触发来源（如「体态评估」「生成计划」），用于文案。
   final String? source;
-  const PaywallScreen({super.key, this.source});
+
+  /// 唤起原因（需要 PRO / 免费额度已用尽），决定标题文案。
+  final PaywallReason? reason;
+
+  const PaywallScreen({super.key, this.source, this.reason});
 
   /// 以全屏对话框形式打开付费墙，返回是否成功开通。
-  static Future<T?> push<T>(BuildContext context, {String? source}) {
+  static Future<T?> push<T>(
+    BuildContext context, {
+    String? source,
+    PaywallReason? reason,
+  }) {
     return Navigator.of(context).push<T>(
       MaterialPageRoute(
-        builder: (_) => PaywallScreen(source: source),
+        builder: (_) => PaywallScreen(source: source, reason: reason),
         fullscreenDialog: true,
       ),
     );
@@ -86,10 +95,11 @@ class PaywallScreen extends ConsumerWidget {
   Widget _content(
       BuildContext context, PaymentController controller, PaymentState state) {
     final recommendedCode = _recommendedCode(state.plans);
+    final r = reason ?? const PaywallReason();
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
       children: [
-        _hero(state.channel),
+        _hero(r),
         const SizedBox(height: 22),
         _features(),
         const SizedBox(height: 24),
@@ -108,15 +118,21 @@ class PaywallScreen extends ConsumerWidget {
             )),
         if (state.channels.length > 1) ...[
           const SizedBox(height: 8),
-          _channelSelector(controller, state),
+          _channelSelector(context, controller, state),
         ],
         if (state.message != null &&
-            state.stage == PurchaseStage.error) ...[
+            state.stage != PurchaseStage.processing &&
+            state.stage != PurchaseStage.success) ...[
           const SizedBox(height: 12),
           Text(
             state.message!,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppColors.danger, fontSize: 13),
+            style: TextStyle(
+              color: state.stage == PurchaseStage.error
+                  ? AppColors.danger
+                  : AppColors.warning,
+              fontSize: 13,
+            ),
           ),
         ],
         const SizedBox(height: 20),
@@ -146,8 +162,11 @@ class PaywallScreen extends ConsumerWidget {
   }
 
   String _ctaLabel(PaymentState state) {
-    if (!state.isProcessing) return '立即开通 PRO';
-    return '处理中…';
+    if (state.isProcessing) return '处理中…';
+    if (!isClientChannelReady(state.channel)) {
+      return '${paymentChannelLabel(state.channel)} · 即将上线';
+    }
+    return '立即开通 PRO';
   }
 
   String? _recommendedCode(List<PaymentPlan> plans) {
@@ -162,9 +181,19 @@ class PaywallScreen extends ConsumerWidget {
     return plans.isNotEmpty ? plans.first.planCode : null;
   }
 
-  Widget _hero(String channel) {
+  Widget _hero(PaywallReason reason) {
+    final exhausted = reason.isQuotaExhausted;
+    final featureLabel = reason.featureLabel(source);
+    final title = exhausted
+        ? (featureLabel != null
+            ? '本月$featureLabel免费次数已用完'
+            : '本月免费次数已用完')
+        : '解锁 AI 私教全部能力';
+    final subtitle = exhausted
+        ? '开通 PRO 不限次 · 持续解锁 AI 计划与体态评估'
+        : '无限生成专属计划 · 体态拍照评估 · 持续训练追踪';
     return HudCard(
-      cornerColor: AppColors.energy,
+      cornerColor: exhausted ? AppColors.hot : AppColors.energy,
       glow: true,
       padding: const EdgeInsets.all(22),
       child: Column(
@@ -178,27 +207,54 @@ class PaywallScreen extends ConsumerWidget {
                 color: AppColors.hot,
               ),
               const Spacer(),
-              const Icon(Icons.auto_awesome_rounded,
-                  color: AppColors.energy, size: 22),
+              Icon(
+                exhausted ? Icons.flash_on_rounded : Icons.auto_awesome_rounded,
+                color: AppColors.energy,
+                size: 22,
+              ),
             ],
           ),
           const SizedBox(height: 16),
           Text(
-            '解锁 AI 私教全部能力',
+            title,
             style: AppTheme.display(24, weight: FontWeight.w800),
           ),
           const SizedBox(height: 8),
-          const Text(
-            '无限生成专属计划 · 体态拍照评估 · 持续训练追踪',
-            style: TextStyle(
+          Text(
+            subtitle,
+            style: const TextStyle(
                 fontFamily: 'monospace',
                 color: AppColors.textSecondary,
                 fontSize: 12,
                 height: 1.5),
           ),
+          if (exhausted && reason.resetAt != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.schedule_rounded,
+                    size: 13, color: AppColors.textMuted),
+                const SizedBox(width: 5),
+                Text(
+                  '免费额度于 ${_formatReset(reason.resetAt!)} 重置',
+                  style: const TextStyle(
+                      fontFamily: 'monospace',
+                      color: AppColors.textMuted,
+                      fontSize: 11),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  String _formatReset(DateTime dt) {
+    final local = dt.toLocal();
+    final m = local.month.toString().padLeft(2, '0');
+    final d = local.day.toString().padLeft(2, '0');
+    return '${local.year}-$m-$d';
   }
 
   Widget _features() {
@@ -249,36 +305,54 @@ class PaywallScreen extends ConsumerWidget {
   }
 
   Widget _channelSelector(
-      PaymentController controller, PaymentState state) {
-    return Row(
+      BuildContext context, PaymentController controller, PaymentState state) {
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 8,
+      runSpacing: 8,
       children: [
-        const Text('支付渠道',
-            style:
-                TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-        const SizedBox(width: 12),
+        const Padding(
+          padding: EdgeInsets.only(right: 4),
+          child: Text('支付渠道',
+              style:
+                  TextStyle(color: AppColors.textSecondary, fontSize: 12)),
+        ),
         ...state.channels.map((c) {
           final selected = c == state.channel;
-          final label = c == 'apple' ? 'App Store' : '沙箱联调';
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
-              label: Text(label),
-              selected: selected,
-              onSelected: (_) => controller.selectChannel(c),
-              selectedColor: AppColors.energy.withValues(alpha: 0.2),
-              labelStyle: TextStyle(
-                color: selected ? AppColors.energy : AppColors.textSecondary,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                fontSize: 12,
-              ),
-              side: BorderSide(
-                color: selected
-                    ? AppColors.energy
-                    : AppColors.border,
-              ),
-              backgroundColor: Colors.transparent,
-              showCheckmark: false,
+          final ready = isClientChannelReady(c);
+          return ChoiceChip(
+            label: Text(ready
+                ? paymentChannelLabel(c)
+                : '${paymentChannelLabel(c)} · 即将上线'),
+            selected: selected,
+            onSelected: (_) {
+              if (!ready) {
+                ScaffoldMessenger.of(context)
+                  ..clearSnackBars()
+                  ..showSnackBar(SnackBar(
+                    content: Text(
+                        '${paymentChannelLabel(c)}支付筹备中，即将上线，敬请期待'),
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                return;
+              }
+              controller.selectChannel(c);
+            },
+            selectedColor: AppColors.energy.withValues(alpha: 0.2),
+            labelStyle: TextStyle(
+              color: selected
+                  ? AppColors.energy
+                  : (ready
+                      ? AppColors.textSecondary
+                      : AppColors.textMuted),
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              fontSize: 12,
             ),
+            side: BorderSide(
+              color: selected ? AppColors.energy : AppColors.border,
+            ),
+            backgroundColor: Colors.transparent,
+            showCheckmark: false,
           );
         }),
       ],
