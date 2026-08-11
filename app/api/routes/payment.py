@@ -149,5 +149,12 @@ async def payment_callback(
         logger.warning("支付回调处理失败 channel=%s err=%s", channel, exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    # 各渠道期望的成功应答不同；沙箱/通用返回 ok，真实渠道接入时在此按渠道适配
+    # 各渠道期望的成功应答不同：支付宝必须回纯文本 "success"，微信回 JSON SUCCESS，
+    # 其余（沙箱等）回通用 ok。应答错误会导致渠道持续重放回调。
+    if channel == "alipay":
+        from fastapi import Response
+
+        return Response(content="success", media_type="text/plain")
+    if channel == "wechat":
+        return {"code": "SUCCESS", "message": "成功"}
     return {"code": "ok", "channel": channel}
