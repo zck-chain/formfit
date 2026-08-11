@@ -5,9 +5,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.rate_limit import limiter
 from app.db.session import Base, get_db
 from app.main import app
 from app.models import *  # noqa: F401,F403  注册模型
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """每个测试重置限流计数器，避免全局内存限流在测试间累积导致 429。"""
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 @pytest.fixture()

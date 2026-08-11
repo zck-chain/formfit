@@ -122,6 +122,15 @@ def test_pro_user_assess_passes(client, register_user, db_session, monkeypatch, 
     headers, user = register_user()
     _grant_pro(db_session, user["id"])
 
+    # 真实 PNG（1x1），通过 magic bytes/Pillow 校验
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (1, 1), (0, 0, 0)).save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+
     async def _fake_assess(path, **kwargs):
         return {
             "direction": "gain",
@@ -136,7 +145,7 @@ def test_pro_user_assess_passes(client, register_user, db_session, monkeypatch, 
     resp = client.post(
         "/api/fitness/assess",
         headers=headers,
-        files={"file": ("a.jpg", b"fakepng", "image/png")},
+        files={"file": ("a.png", png_bytes, "image/png")},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["direction"] == "gain"
