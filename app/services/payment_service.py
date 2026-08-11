@@ -100,21 +100,50 @@ def _catalog(plan_code: str) -> dict:
     return item
 
 
+def _is_membership_user_id_conflict(exc: IntegrityError) -> bool:
+    """判断 IntegrityError 是否为 ``memberships.user_id`` 唯一约束竞争。
+
+    只把这一个**预期的并发兜底建行**冲突收敛为重查；其他约束冲突（外键、
+    provider_subscription_id 唯一等）必须原样抛出，不得静默吞掉。
+    覆盖 SQLite（``UNIQUE constraint failed: memberships.user_id``）与
+    PostgreSQL（SQLSTATE 23505 + 约束名）两种方言。
+    """
+    orig = getattr(exc, "orig", None)
+    # PostgreSQL：唯一冲突 SQLSTATE 为 23505，constraint_name 指向该唯一约束
+    pgcode = getattr(orig, "pgcode", None)
+    if pgcode == "23505":
+        diag = getattr(orig, "diag", None)
+        constraint = getattr(diag, "constraint_name", "") or ""
+        return "user_id" in constraint and "membership" in constraint
+    # SQLite：错误消息直接带表名.列名
+    msg = str(orig).lower()
+    return "unique" in msg and "memberships.user_id" in msg
+
+
 def _get_membership(db: Session, user_id: int) -> Membership:
     m = db.scalar(select(Membership).where(Membership.user_id == user_id))
     if not m:
-        # 注册流程已为每个用户建会员行，这里仅兜底。用 savepoint 包裹插入：
+        # 注册流程已为每个用户建会员行，这里仅兜底。用 savepoint 包裹 add+flush：
         # 并发下若两个事务都为同一 user 建行，一个提交成功，另一个在此命中
-        # user_id 唯一约束——只回滚该 savepoint，绝不能回滚外层核销事务。
-        m = Membership(user_id=user_id, plan="free", is_active=False)
-        db.add(m)
+        # user_id 唯一约束。关键：只回滚该 savepoint，绝不能调用全量
+        # Session.rollback()——否则会把外层订单核销事务（原子认领、fulfilled_at、
+        # 渠道交易号）一并回滚，并可能使 session 进入 PendingRollbackError。
+        # 因此必须把 add 放在 begin_nested() 内：savepoint 回滚时该 pending 实例
+        # 会被自动 expunge，session 仍可继续 flush/commit。
         try:
             with db.begin_nested():
+                m = Membership(user_id=user_id, plan="free", is_active=False)
+                db.add(m)
                 db.flush()
-        except IntegrityError:
-            db.rollback()
+        except IntegrityError as exc:
+            if not _is_membership_user_id_conflict(exc):
+                # 非预期约束冲突（外键缺失、其他唯一约束等）：不得误判为并发建行，
+                # begin_nested 上下文已只回滚 savepoint，这里直接向上抛。
+                raise
+            # 预期的 user_id 竞争：赢家事务已（或即将）提交该行，重新查询。
             m = db.scalar(select(Membership).where(Membership.user_id == user_id))
             if not m:
+                # 理论不可达：约束冲突说明已有该行；防御性抛出，避免返回 None。
                 raise
     return m
 

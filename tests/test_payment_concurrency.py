@@ -24,7 +24,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
@@ -400,3 +401,159 @@ def test_audit_events_recorded_and_sanitized(file_db):
             assert settings.sandbox_secret not in blob
     finally:
         verify.close()
+
+
+# ---------- 6. 并发会员兜底建行：savepoint 不得回滚外层核销事务（WS-35）----------
+def _seed_dirty_user_without_membership(seed, user_id, order_no):
+    """历史/脏数据：用户存在、订单存在，但 memberships 行缺失。"""
+    user = User(
+        id=user_id,
+        email=f"dirty{user_id}@test.com",
+        hashed_password=hash_password("secret123"),
+        role="user",
+        is_active=True,
+    )
+    seed.add(user)
+    order = Order(
+        order_no=order_no,
+        user_id=user_id,
+        plan="pro",
+        plan_code="pro_monthly",
+        duration_days=30,
+        amount_cents=2800,
+        currency="CNY",
+        payment_channel="sandbox",
+        status="pending",
+    )
+    seed.add(order)
+    seed.commit()
+    return order
+
+
+def test_concurrent_membership_backfill_savepoint_preserves_outer_txn(file_db):
+    """两个独立连接真实交错触发同一 user 的会员兜底建行竞争。
+
+    loser 的事务先 SELECT 发现无会员行；在 loser 的 INSERT 真正落库前，另一个连接
+    已经并发提交了同一 user 的会员行。loser 的 INSERT 因此命中 ``memberships.user_id``
+    唯一约束，必须只回滚 savepoint 并重查赢家行——绝不能全量 ``db.rollback()``
+    （会把外层订单核销事务一并回滚），也不能让 session 进入 ``PendingRollbackError``。
+
+    注：SQLite 写事务串行，核销主流程里订单认领 UPDATE 会先拿写锁，因此这里直接驱动
+    ``_apply_membership``（其前置仅为 SELECT，WAL 下允许并发写者提交）以确定性命中
+    savepoint 路径；外层核销的后续写入在冲突恢复后仍可提交是本测试的核心断言。
+    """
+    Session, seed = file_db
+    order = _seed_dirty_user_without_membership(seed, 50, "FF-N3-1")
+
+    engine = Session.kw["bind"]
+    seeded = {"done": False}
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def _seed_winner(conn, cursor, statement, params, context, executemany):
+        if seeded["done"]:
+            return
+        if "insert into memberships" not in str(statement).lower():
+            return
+        seeded["done"] = True
+        # 在 loser 的 INSERT 执行前，用独立连接并发提交赢家会员行
+        wdb = Session()
+        try:
+            wdb.add(Membership(user_id=50, plan="free", is_active=False))
+            wdb.commit()
+        finally:
+            wdb.close()
+
+    try:
+        loser = Session()
+        try:
+            # 监视：兜底冲突处理期间不得调用全量 Session.rollback()
+            real_rollback = loser.rollback
+            rollback_calls = {"n": 0}
+
+            def _spy_rollback(*a, **k):
+                rollback_calls["n"] += 1
+                return real_rollback(*a, **k)
+
+            loser.rollback = _spy_rollback  # type: ignore[method-assign]
+
+            # 核销里的会员开通路径（兜底建行 + 权益顺延）
+            m = payment_service._apply_membership(
+                loser,
+                user_id=50,
+                plan="pro",
+                duration_days=30,
+                channel="sandbox",
+                order_no="FF-N3-1",
+            )
+            assert m.plan == "pro"
+            assert m.is_active is True
+
+            # 外层核销事务的后续写入仍可执行并提交（无 PendingRollbackError）
+            now = datetime.now(timezone.utc)
+            loser.execute(
+                update(Order)
+                .where(Order.id == order.id)
+                .values(status="fulfilled", fulfilled_at=now)
+            )
+            loser.commit()
+
+            # 兜底冲突处理过程中绝不能发生全量 rollback
+            assert rollback_calls["n"] == 0, rollback_calls
+        finally:
+            loser.close()
+    finally:
+        event.remove(engine, "before_cursor_execute", _seed_winner)
+
+    assert seeded["done"] is True, "未真实命中 memberships INSERT/savepoint 路径"
+
+    verify = Session()
+    try:
+        memberships = verify.scalars(
+            select(Membership).where(Membership.user_id == 50)
+        ).all()
+        assert len(memberships) == 1, [mm.id for mm in memberships]
+        m = memberships[0]
+        assert m.is_active is True
+        assert m.plan == "pro"
+        exp = m.expire_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        delta = exp - datetime.now(timezone.utc)
+        assert timedelta(days=29) < delta < timedelta(days=31), delta
+
+        db_order = verify.scalar(select(Order).where(Order.order_no == "FF-N3-1"))
+        assert db_order.status == "fulfilled"
+        assert db_order.fulfilled_at is not None
+    finally:
+        verify.close()
+
+
+def test_get_membership_propagates_non_unique_integrity_error(tmp_path):
+    """非 ``memberships.user_id`` 唯一冲突的 IntegrityError 不得被误判为并发建行而吞掉。
+
+    打开 SQLite 外键约束，用不存在的 user_id 触发 FOREIGN KEY 失败：这不是预期的
+    并发建行竞争，必须原样向上抛出，且 savepoint 回滚后不得留下半条会员记录。
+    """
+    db_path = tmp_path / "fk.db"
+    eng = create_engine(f"sqlite:///{db_path}", connect_args={"timeout": 5})
+
+    @event.listens_for(eng, "connect")
+    def _enable_fk(dbapi_conn, _record):
+        cur = dbapi_conn.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
+
+    Base.metadata.create_all(eng)
+    Sess = sessionmaker(bind=eng, autoflush=False, autocommit=False)
+    db = Sess()
+    try:
+        with pytest.raises(IntegrityError) as ei:
+            payment_service._get_membership(db, 999999)
+        assert "foreign key" in str(ei.value.orig).lower()
+        # 非唯一约束冲突应向上抛，且没有留下会员行
+        assert (
+            db.scalar(select(Membership).where(Membership.user_id == 999999)) is None
+        )
+    finally:
+        db.close()
+        eng.dispose()
