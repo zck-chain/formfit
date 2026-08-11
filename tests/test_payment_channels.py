@@ -22,6 +22,18 @@ from app.payment.alipay import AlipayProvider, _build_sign_string
 from app.payment.wechat import WechatProvider
 
 
+def _corrupt_signature(sig: str) -> str:
+    """确定性破坏一个 base64 签名：把首字符换成另一个有效 base64 字符。
+
+    不能用 ``sig.replace("A", "B")`` —— 当随机生成的 344 字符签名恰好不含 "A"
+    时（约 0.5% 概率），replace 是空操作，伪造用例会偶发“验签通过”而误报失败。
+    RSA-PKCS1v15 对任何比特翻转都几乎必然验签失败，故改首字符即可稳定触发拒绝。
+    """
+    first = sig[0]
+    replacement = "B" if first == "A" else "A"
+    return replacement + sig[1:]
+
+
 # ---------- 测试密钥夹具 ----------
 @pytest.fixture()
 def rsa_keypair():
@@ -141,7 +153,7 @@ def _alipay_callback_body(priv_key: str, overrides: dict | None = None,
     sign_data = {k: v for k, v in data.items() if k != "sign_type"}
     data["sign"] = rsa_sign_sha256(priv_key, _build_sign_string(sign_data))
     if tamper_sign:
-        data["sign"] = data["sign"].replace("A", "B")
+        data["sign"] = _corrupt_signature(data["sign"])
     return urllib.parse.urlencode(data).encode("utf-8")
 
 
@@ -294,7 +306,7 @@ def _wechat_callback(platform_key, api_v3_key: str, resource_plain: dict,
         encryption_algorithm=serialization.NoEncryption(),
     ).decode(), sign_msg)
     if tamper_sign:
-        signature = signature.replace("A", "B")
+        signature = _corrupt_signature(signature)
     headers = {
         "wechatpay-timestamp": timestamp,
         "wechatpay-nonce": nonce,

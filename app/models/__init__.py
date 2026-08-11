@@ -2,6 +2,7 @@
 from app.db.session import Base
 from app.models.exercise import Exercise
 from app.models.order import Order
+from app.models.payment_audit import PaymentAuditEvent
 from app.models.user import (
     BodyAssessment,
     Membership,
@@ -23,4 +24,5 @@ __all__ = [
     "WorkoutLog",
     "WorkoutSet",
     "Order",
+    "PaymentAuditEvent",
 ]
