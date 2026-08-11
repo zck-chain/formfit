@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.routes import admin, auth, exercises, fitness, payment
+from app.api.routes import admin, auth, exercises, fitness, membership, payment
 from app.core.config import BASE_DIR, DATASET_DIR, settings
 from app.db.session import Base, engine
 from app.models import *  # noqa: F401,F403  确保所有模型注册到 Base.metadata
@@ -36,6 +36,7 @@ app.include_router(exercises.router)
 app.include_router(fitness.router)
 app.include_router(admin.router)
 app.include_router(payment.router)
+app.include_router(membership.router)
 
 # 静态资源：后台 CSS/JS，以及用户上传（位于 app/static 下）
 _STATIC_DIR = BASE_DIR / "app" / "static"
@@ -79,6 +80,7 @@ def root():
             "exercises": "/api/exercises",
             "fitness": "/api/fitness",
             "payment": "/api/payment",
+            "membership": "/api/membership",
         },
     }
 

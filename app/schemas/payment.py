@@ -71,3 +71,19 @@ class RestoreIn(BaseModel):
     channel: str = "apple"
     # Apple: base64 receipt；其他渠道：交易号/票据
     receipt_data: str = Field(..., min_length=1)
+
+
+class MembershipOut(BaseModel):
+    """当前用户会员态。供 App 在启动/支付完成后刷新权益与付费墙状态。"""
+
+    plan: str = Field(..., description="free / pro")
+    is_active: bool = Field(..., description="会员当前是否有效（已激活且未过期）")
+    is_pro: bool = Field(..., description="有效且为 pro 套餐的便捷标志")
+    expire_at: datetime | None = None
+    payment_channel: str | None = None
+    # 客户端据此判断是否展示付费墙/解锁被门控功能
+    features_locked: bool = Field(
+        ..., description="PRO 功能是否被锁定（true 时前端应弹付费墙）"
+    )
+
+    model_config = {"from_attributes": True}

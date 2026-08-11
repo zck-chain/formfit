@@ -13,6 +13,7 @@ def _grant_pro(db_session, user_id: int, days: int = 30) -> Membership:
     m.is_active = True
     m.start_at = now
     m.expire_at = now + timedelta(days=days)
+    m.payment_channel = "sandbox"
     db_session.commit()
     return m
 
@@ -48,6 +49,53 @@ def test_anonymous_blocked(client):
     # 未登录先走认证 -> 401（门控依赖于登录用户）
     resp = client.post("/api/fitness/plans/generate", json={"goal": "增肌"})
     assert resp.status_code == 401
+
+
+# ---------- GET /api/membership 会员态查询 ----------
+def test_membership_free_default(client, register_user):
+    headers, _ = register_user()
+    resp = client.get("/api/membership", headers=headers)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["plan"] == "free"
+    assert data["is_active"] is False
+    assert data["is_pro"] is False
+    assert data["features_locked"] is True
+    assert data["expire_at"] is None
+
+
+def test_membership_anonymous_401(client):
+    assert client.get("/api/membership").status_code == 401
+
+
+def test_membership_reflects_pro_after_payment(client, register_user, db_session):
+    import hashlib
+    import hmac
+
+    from app.core.config import settings
+
+    headers, user = register_user()
+    _grant_pro(db_session, user["id"])
+
+    resp = client.get("/api/membership", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["plan"] == "pro"
+    assert data["is_active"] is True
+    assert data["is_pro"] is True
+    assert data["features_locked"] is False
+    assert data["expire_at"] is not None
+    assert data["payment_channel"] is not None
+
+
+def test_membership_expired_shows_locked(client, register_user, db_session):
+    headers, user = register_user()
+    _grant_pro(db_session, user["id"], days=-1)
+    data = client.get("/api/membership", headers=headers).json()
+    # 过期 pro 视为非有效，功能锁定（plan 字段仍为 pro，但 is_active/is_pro 为 false）
+    assert data["is_active"] is False
+    assert data["is_pro"] is False
+    assert data["features_locked"] is True
 
 
 # ---------- pro 用户通过 ----------

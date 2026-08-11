@@ -35,3 +35,29 @@ def get_active_membership(db: Session, user_id: int) -> Membership | None:
 def is_pro(db: Session, user_id: int) -> bool:
     m = get_active_membership(db, user_id)
     return bool(m and m.plan == "pro")
+
+
+def get_or_create_membership(db: Session, user_id: int) -> Membership:
+    """取当前用户会员记录；不存在则建一条 free 记录（与注册流程保持一致）。"""
+    m = db.scalar(select(Membership).where(Membership.user_id == user_id))
+    if not m:
+        m = Membership(user_id=user_id, plan="free", is_active=False)
+        db.add(m)
+        db.commit()
+        db.refresh(m)
+    return m
+
+
+def membership_view(m: Membership | None) -> dict:
+    """序列化为 MembershipOut：统一“有效/是否 PRO/是否锁功能”的判定口径。"""
+    active = is_membership_active(m)
+    pro = bool(active and m and m.plan == "pro")
+    return {
+        "plan": (m.plan if m else "free"),
+        "is_active": active,
+        "is_pro": pro,
+        "expire_at": m.expire_at if m else None,
+        "payment_channel": m.payment_channel if m else None,
+        # PRO 功能锁定：非有效 PRO 即锁定，前端据此弹付费墙
+        "features_locked": not pro,
+    }
