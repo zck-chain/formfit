@@ -184,13 +184,15 @@ class PaywallScreen extends ConsumerWidget {
   Widget _hero(PaywallReason reason) {
     final exhausted = reason.isQuotaExhausted;
     final featureLabel = reason.featureLabel(source);
+    // 共享池口径：标题统一说「本月免费次数已用完」，不再按功能命名；
+    // 副标题点出刚才触发的操作，但明确额度是共享的同一个。
     final title = exhausted
-        ? (featureLabel != null
-            ? '本月$featureLabel免费次数已用完'
-            : '本月免费次数已用完')
+        ? '本月免费次数已用完'
         : '解锁 AI 私教全部能力';
     final subtitle = exhausted
-        ? '开通 PRO 不限次 · 持续解锁 AI 计划与体态评估'
+        ? (featureLabel != null
+            ? '刚才的「$featureLabel」已计入本月共享额度，开通 PRO 不限次'
+            : '体态评估与 AI 计划共享月度额度，开通 PRO 不限次')
         : '无限生成专属计划 · 体态拍照评估 · 持续训练追踪';
     return HudCard(
       cornerColor: exhausted ? AppColors.hot : AppColors.energy,

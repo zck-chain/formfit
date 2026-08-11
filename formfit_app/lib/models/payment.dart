@@ -196,6 +196,8 @@ class OrderStatus {
 }
 
 /// 后端配额功能标识，与 `app/api/deps.py` 的 PRO_FEATURES 对齐。
+///
+/// 用于共享额度的 `breakdown` 展示拆分（各功能已用次数），不再对应独立额度。
 class QuotaFeatures {
   QuotaFeatures._();
   static const assess = 'assess';
@@ -208,42 +210,59 @@ class QuotaFeatures {
   };
 }
 
-/// 单个 PRO 功能的月度免费额度状态（`GET /api/membership` 的 `quota.<feature>`）。
+/// 月度免费额度（`GET /api/membership` 的 `quota`）。
 ///
-/// PRO 用户 [remaining] 为 `null`（不限次）；免费用户为剩余次数。
+/// 产品口径：体态评估与 AI 计划生成**共享**同一个月度额度池
+/// （`scope: "shared"`），`used` 为两者合计、`remaining` 为共享剩余。
+/// PRO 用户 [remaining] 为 `null`（不限次）。[breakdown] 仅用于展示各功能已用拆分。
 class Quota {
-  final String feature;
+  /// 额度口径，当前为 `shared`（共享池）。
+  final String scope;
   final int limit;
   final int used;
   final int? remaining;
   final DateTime? resetAt;
 
+  /// 各功能已用次数拆分，如 `{assess: 1, generate_plan: 2}`；仅展示用。
+  final Map<String, int> breakdown;
+
   const Quota({
-    required this.feature,
+    this.scope = 'shared',
     required this.limit,
     required this.used,
     required this.remaining,
     this.resetAt,
+    this.breakdown = const {},
   });
 
   /// PRO 不限次（remaining 为 null）。
   bool get isUnlimited => remaining == null;
 
-  /// 是否已用尽（仅对免费档有意义）。
+  /// 共享池是否已用尽（仅对免费档有意义）。
   bool get isExhausted => remaining != null && remaining! <= 0;
 
-  /// 中文展示名。
-  String get label => QuotaFeatures.labels[feature] ?? feature;
+  /// 是否为共享额度池。
+  bool get isShared => scope == 'shared';
 
-  factory Quota.fromJson(Map<String, dynamic> json) => Quota(
-        feature: json['feature']?.toString() ?? '',
-        limit: (json['limit'] as num?)?.toInt() ?? 0,
-        used: (json['used'] as num?)?.toInt() ?? 0,
-        remaining: (json['remaining'] as num?)?.toInt(),
-        resetAt: json['reset_at'] != null
-            ? DateTime.tryParse(json['reset_at'].toString())
-            : null,
-      );
+  factory Quota.fromJson(Map<String, dynamic> json) {
+    final rawBreakdown = json['breakdown'];
+    final breakdown = <String, int>{};
+    if (rawBreakdown is Map) {
+      rawBreakdown.forEach((key, value) {
+        if (value is num) breakdown[key.toString()] = value.toInt();
+      });
+    }
+    return Quota(
+      scope: json['scope']?.toString() ?? 'shared',
+      limit: (json['limit'] as num?)?.toInt() ?? 0,
+      used: (json['used'] as num?)?.toInt() ?? 0,
+      remaining: (json['remaining'] as num?)?.toInt(),
+      resetAt: json['reset_at'] != null
+          ? DateTime.tryParse(json['reset_at'].toString())
+          : null,
+      breakdown: breakdown,
+    );
+  }
 }
 
 /// 当前用户会员态（`GET /api/membership`）。
@@ -257,9 +276,9 @@ class Membership {
   /// PRO 功能是否被锁定——前端据此决定是否弹付费墙。
   final bool featuresLocked;
 
-  /// 各 PRO 功能的本月免费额度（`assess` / `generate_plan`）。
-  /// PRO 用户各项 remaining 为 null；免费用户为剩余次数。
-  final Map<String, Quota> quota;
+  /// 本月共享免费额度。PRO 用户 `remaining` 为 null（不限次）；
+  /// 后端未返回（旧版本/未登录）时为 null。
+  final Quota? quota;
 
   const Membership({
     required this.plan,
@@ -268,11 +287,8 @@ class Membership {
     this.expireAt,
     this.paymentChannel,
     required this.featuresLocked,
-    this.quota = const {},
+    this.quota,
   });
-
-  /// 取指定功能的额度；后端未返回时为 null（按「无免费额度」处理）。
-  Quota? quotaFor(String feature) => quota[feature];
 
   /// 免费用户的默认态。
   static const free = Membership(
@@ -284,14 +300,11 @@ class Membership {
 
   factory Membership.fromJson(Map<String, dynamic> json) {
     final rawQuota = json['quota'];
-    final quota = <String, Quota>{};
-    if (rawQuota is Map) {
-      rawQuota.forEach((key, value) {
-        if (value is Map) {
-          quota[key.toString()] =
-              Quota.fromJson({...value.cast<String, dynamic>(), 'feature': key});
-        }
-      });
+    // 新形状：quota 是单个共享对象（含顶层 limit）。旧形状（按功能的 Map）
+    // 在共享口径下不再使用；遇到时安全降级为 null，不崩溃。
+    Quota? quota;
+    if (rawQuota is Map && rawQuota['limit'] is num) {
+      quota = Quota.fromJson(rawQuota.cast<String, dynamic>());
     }
     return Membership(
       plan: json['plan']?.toString() ?? 'free',
