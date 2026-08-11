@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.core.admin_auth import COOKIE_NAME, create_session, read_session
+from app.core.admin_auth import COOKIE_NAME, create_session, read_session_payload
 from app.core.config import BASE_DIR, settings
 from app.core.security import verify_password
 from app.db.session import get_db
@@ -36,13 +36,19 @@ def _user_count(db: Session) -> int:
 
 
 def _current_admin(request: Request, db: Session) -> User | None:
-    uid = read_session(request.cookies.get(COOKIE_NAME))
-    if not uid:
+    """解析 session cookie：签名/时效有效且用户存在、为 admin、未停用、
+    session_version 一致（未被服务端吊销）才返回该用户。"""
+    payload = read_session_payload(request.cookies.get(COOKIE_NAME))
+    if not payload:
         return None
+    uid, ver = payload
     user = db.get(User, uid)
-    if user and user.role == "admin" and user.is_active:
-        return user
-    return None
+    if not user or user.role != "admin" or not user.is_active:
+        return None
+    if user.session_version != ver:
+        # 服务端已吊销（登出/改密），cookie 失效
+        return None
+    return user
 
 
 def require_admin(request: Request, db: Session) -> User:
@@ -77,14 +83,26 @@ def login_submit(
             {"error": "邮箱或密码错误，或该账号非管理员"},
             status_code=401,
         )
-    token = create_session(user.id)
+    token = create_session(user.id, user.session_version)
     resp = RedirectResponse("/admin", status_code=303)
-    resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=60 * 60 * 24 * 7)
+    resp.set_cookie(
+        COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.is_production,
+        max_age=settings.admin_session_max_age_seconds,
+    )
     return resp
 
 
 @router.post("/admin/logout")
-def logout():
+def logout(request: Request, db: Session = Depends(get_db)):
+    # 服务端吊销：递增 session_version，使该管理员已签发的 cookie 全部失效
+    admin = _current_admin(request, db)
+    if admin:
+        admin.session_version += 1
+        db.commit()
     resp = RedirectResponse("/admin/login", status_code=303)
     resp.delete_cookie(COOKIE_NAME)
     return resp

@@ -30,6 +30,10 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(16), default="user", index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # 后台会话版本号：递增可使该管理员已签发的 session cookie 全部失效（服务端可吊销）。
+    # 仅对 admin 有意义；普通 App 用户用 JWT，不依赖此值。
+    session_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
