@@ -50,8 +50,8 @@ def get_optional_user(
 
 
 # ---------- PRO 会员门控 ----------
-# PRO 用户不限；free 用户每个 PRO 功能每月各 FREE_QUOTA_PER_MONTH 次（按自然月 UTC），
-# 超额返回 402 quota_exhausted，未登录/非 PRO 且无可用额度返回 402 pro_required。
+# PRO 用户不限；free 用户体态评估与 AI 计划生成**共享**每月 FREE_QUOTA_PER_MONTH 次
+# （按自然月 UTC，两功能合计），超额返回 402 quota_exhausted。
 
 # 需要 PRO 权益的功能标识，响应体回传给客户端用于引导付费墙
 PRO_FEATURES = {
@@ -61,19 +61,16 @@ PRO_FEATURES = {
 
 
 def require_pro_membership(feature: str):
-    """生成一个依赖：放行有效 PRO 会员；free 用户在月度配额内放行，超额返回 402。
+    """生成一个依赖：放行有效 PRO 会员；free 用户在共享月度配额内放行，超额返回 402。
 
     用法（路由参数）：
         @router.post("/assess", dependencies=[Depends(require_pro_membership("assess"))])
 
-    计数口径（自然月 UTC）：
-        - assess      → 本月 body_assessments 成功记录数
-        - generate_plan → 本月 plans 记录数
+    计数口径（自然月 UTC，共享池）：本月 body_assessments 与 plans 成功记录数**之和**；
+    assess 和 generate_plan 任一次调用都从同一池子扣减。
     门控在业务处理前查询，因此 used 为此前已成功完成的次数；本次成功后由路由新增记录，
-    自然计入当月额度。PRO 用户不受额度限制。
+    自然计入当月额度。PRO 用户不受额度限制。`feature` 仅用于响应标识，不影响计数。
     """
-
-    label = PRO_FEATURES.get(feature, feature)
 
     def _dependency(
         response: Response,
@@ -98,7 +95,7 @@ def require_pro_membership(feature: str):
                 detail={
                     "error": "quota_exhausted",
                     "feature": feature,
-                    "message": f"本月{label}免费额度已用完，升级 PRO 不限次",
+                    "message": "本月免费额度已用完，升级 PRO 不限次",
                     "limit": quota["limit"],
                     "used": quota["used"],
                     "reset_at": quota["reset_at"].isoformat(),

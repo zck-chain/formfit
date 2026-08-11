@@ -24,5 +24,5 @@ def get_membership(
     """
     m = membership_service.get_or_create_membership(db, user.id)
     view = membership_service.membership_view(m)
-    view["quota"] = membership_service.all_quota_status(db, user.id)
+    view["quota"] = membership_service.quota_status(db, user.id)
     return MembershipOut(**view)

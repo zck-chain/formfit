@@ -95,9 +95,10 @@ class Settings(BaseSettings):
     rate_limit_generate_plan: str = "20/minute"
     rate_limit_create_order: str = "30/minute"
 
-    # ---- 免费档月度配额 ----
-    # 免费用户每个 PRO 功能（体态评估 / AI 计划生成）每月可用次数（按自然月 UTC）。
-    # 设为 0 表示免费档完全无额度（等同硬门控）；PRO 用户不受此限。
+    # ---- 免费档月度配额（共享池）----
+    # 免费用户体态评估 + AI 计划生成**共享**每月可用次数（按自然月 UTC）。
+    # 两功能合计达到该上限即返回 402 quota_exhausted。设为 0 表示免费档完全无额度；
+    # PRO 用户不受此限。
     free_quota_per_month: int = 5
 
     # ---- 支付 ----
