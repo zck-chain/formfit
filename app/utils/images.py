@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import io
 import logging
-from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
 
@@ -110,9 +109,3 @@ def validate_and_prepare(
         return out.getvalue(), ".jpg", "image/jpeg"
 
     return raw, _NORMALIZED_EXT[real_format], _NORMALIZED_MIME[real_format]
-
-
-def guess_extension(filename: str | None) -> str:
-    """从原始文件名取后缀，作为回退；不信任其内容。"""
-    ext = Path(filename or "").suffix.lower()
-    return ext if ext in (".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif") else ".img"
