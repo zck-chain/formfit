@@ -2,14 +2,18 @@
 from functools import lru_cache
 
 from app.core.config import settings
+from app.payment.alipay import AlipayProvider
 from app.payment.apple import AppleIAPProvider
 from app.payment.base import PaymentProvider
 from app.payment.sandbox import SandboxProvider
+from app.payment.wechat import WechatProvider
 
 # 渠道名 -> 构造器；新增渠道在此登记
 _PROVIDER_FACTORIES = {
     "sandbox": SandboxProvider,
     "apple": AppleIAPProvider,
+    "alipay": AlipayProvider,
+    "wechat": WechatProvider,
 }
 
 

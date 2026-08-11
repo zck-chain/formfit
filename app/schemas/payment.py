@@ -4,7 +4,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-
 # ---------- 套餐目录 ----------
 # 首发套餐待产品最终定价；这里集中维护，供下单校验与 FE-3 拉取。
 # 金额单位为“分”（整数）。provider_product_id 预留给各渠道商品 ID 映射。
@@ -73,6 +72,18 @@ class RestoreIn(BaseModel):
     receipt_data: str = Field(..., min_length=1)
 
 
+class QuotaOut(BaseModel):
+    """单个 PRO 功能的月度配额状态。"""
+
+    feature: str
+    limit: int = Field(..., description="每月免费次数上限")
+    used: int = Field(..., description="本月已用次数（UTC 自然月）")
+    remaining: int | None = Field(
+        ..., description="剩余次数；PRO 用户为 null（不限次）"
+    )
+    reset_at: datetime = Field(..., description="额度重置时间（次月 1 日 UTC）")
+
+
 class MembershipOut(BaseModel):
     """当前用户会员态。供 App 在启动/支付完成后刷新权益与付费墙状态。"""
 
@@ -84,6 +95,11 @@ class MembershipOut(BaseModel):
     # 客户端据此判断是否展示付费墙/解锁被门控功能
     features_locked: bool = Field(
         ..., description="PRO 功能是否被锁定（true 时前端应弹付费墙）"
+    )
+    # 免费档月度配额：每个 PRO 功能本月 limit/used/remaining/reset_at；
+    # PRO 用户 remaining 为 null（不限次）。
+    quota: dict[str, QuotaOut] = Field(
+        default_factory=dict, description="各 PRO 功能的本月免费额度状态"
     )
 
     model_config = {"from_attributes": True}

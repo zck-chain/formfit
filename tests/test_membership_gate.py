@@ -1,9 +1,13 @@
-"""PRO 会员门控测试：free 被拒（402），pro 通过，支付沙箱链路后可调用。"""
+"""PRO 会员门控与免费额度测试。
+
+PRO 不限次；free 用户每个 PRO 功能每月各 5 次（默认），第 6 次 402 quota_exhausted。
+"""
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.models import Membership
+from app.models import BodyAssessment, Membership, Plan
+from app.core.config import settings
 
 
 def _grant_pro(db_session, user_id: int, days: int = 30) -> Membership:
@@ -18,10 +22,35 @@ def _grant_pro(db_session, user_id: int, days: int = 30) -> Membership:
     return m
 
 
-# ---------- free 用户被拒 ----------
-def test_free_user_assess_blocked(client, register_user):
-    headers, _ = register_user()
-    # 任意图片请求都会在进入处理前被门控拦下（402）
+def _seed_assessments(db_session, user_id: int, n: int) -> None:
+    for _ in range(n):
+        db_session.add(
+            BodyAssessment(
+                user_id=user_id,
+                media_path="uploads/x.jpg",
+                media_type="image",
+                summary="seed",
+            )
+        )
+    db_session.commit()
+
+
+def _seed_plans(db_session, user_id: int, n: int) -> None:
+    for _ in range(n):
+        db_session.add(Plan(user_id=user_id, title="seed", content={}))
+    db_session.commit()
+
+
+# ---------- 免费额度内放行 / 超额 402 ----------
+def test_free_user_assess_quota_exhausted(client, register_user, db_session, monkeypatch):
+    headers, user = register_user()
+    _seed_assessments(db_session, user["id"], settings.free_quota_per_month)
+
+    async def _fake_assess(path, **kwargs):  # pragma: no cover - 不应走到
+        raise AssertionError("超额时不应进入评估逻辑")
+
+    monkeypatch.setattr("app.agent.qwen_vl_client.assess_body", _fake_assess)
+
     resp = client.post(
         "/api/fitness/assess",
         headers=headers,
@@ -29,20 +58,121 @@ def test_free_user_assess_blocked(client, register_user):
     )
     assert resp.status_code == 402, resp.text
     body = resp.json()["detail"]
-    assert body["error"] == "pro_required"
+    assert body["error"] == "quota_exhausted"
     assert body["feature"] == "assess"
+    assert body["limit"] == settings.free_quota_per_month
+    assert body["used"] == settings.free_quota_per_month
     assert body["upgrade_hint"] == "/api/payment/plans"
+    assert "reset_at" in body
 
 
-def test_free_user_generate_plan_blocked(client, register_user):
-    headers, _ = register_user()
+def test_free_user_generate_plan_quota_exhausted(client, register_user, db_session, monkeypatch):
+    headers, user = register_user()
+    _seed_plans(db_session, user["id"], settings.free_quota_per_month)
+
+    async def _fake_generate(db, profile, assessment):  # pragma: no cover
+        raise AssertionError("超额时不应进入计划生成逻辑")
+
+    monkeypatch.setattr("app.agent.planner.generate_plan", _fake_generate)
+
     resp = client.post(
         "/api/fitness/plans/generate",
         headers=headers,
         json={"goal": "增肌"},
     )
     assert resp.status_code == 402, resp.text
-    assert resp.json()["detail"]["feature"] == "generate_plan"
+    body = resp.json()["detail"]
+    assert body["error"] == "quota_exhausted"
+    assert body["feature"] == "generate_plan"
+
+
+def test_free_user_first_assess_passes_quota_gate(
+    client, register_user, monkeypatch, tmp_path
+):
+    """免费用户首次评估应通过门控（额度内），进入业务逻辑（mock AI 后返回 200）。"""
+    headers, _ = register_user()
+
+    import io
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (1, 1), (0, 0, 0)).save(buf, format="PNG")
+
+    async def _fake_assess(path, **kwargs):
+        return {
+            "direction": "gain",
+            "body_type": "ectomorph",
+            "summary": "测试评估",
+            "observed": [],
+            "safety_notes": None,
+        }
+
+    monkeypatch.setattr("app.agent.qwen_vl_client.assess_body", _fake_assess)
+    # 不真实落盘到 static/uploads，mock 掉写文件
+    monkeypatch.setattr("pathlib.Path.write_bytes", lambda self, data: None)
+
+    resp = client.post(
+        "/api/fitness/assess",
+        headers=headers,
+        files={"file": ("a.png", buf.getvalue(), "image/png")},
+    )
+    assert resp.status_code == 200, resp.text
+    # 响应头带的是门控评估时（本次调用前）的剩余额度：首次为满额
+    assert resp.headers["X-Quota-Feature"] == "assess"
+    assert resp.headers["X-Quota-Remaining"] == str(settings.free_quota_per_month)
+    # 调用成功后已新增一条记录，/membership 反映已用 1 次
+    mem = client.get("/api/membership", headers=headers).json()
+    assert mem["quota"]["assess"]["used"] == 1
+    assert mem["quota"]["assess"]["remaining"] == settings.free_quota_per_month - 1
+
+
+def test_free_user_first_generate_plan_passes_quota_gate(client, register_user, monkeypatch):
+    headers, _ = register_user()
+
+    async def _fake_generate(db, profile, assessment):
+        return {"title": "免费额度内计划", "weeks": 4, "days_per_week": 3, "items": []}
+
+    monkeypatch.setattr("app.agent.planner.generate_plan", _fake_generate)
+
+    resp = client.post(
+        "/api/fitness/plans/generate",
+        headers=headers,
+        json={"goal": "增肌"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["title"] == "免费额度内计划"
+    # 门控头反映本次调用前的剩余（满额）；成功后 /membership 显示已用 1 次
+    assert resp.headers["X-Quota-Remaining"] == str(settings.free_quota_per_month)
+    mem = client.get("/api/membership", headers=headers).json()
+    assert mem["quota"]["generate_plan"]["used"] == 1
+    assert mem["quota"]["generate_plan"]["remaining"] == settings.free_quota_per_month - 1
+
+
+def test_quota_is_per_feature_not_shared(client, register_user, db_session, monkeypatch):
+    """评估与计划生成各算各的：评估额度用尽不影响计划生成（反之亦然）。"""
+    headers, user = register_user()
+    # 只把评估额度用尽
+    _seed_assessments(db_session, user["id"], settings.free_quota_per_month)
+
+    async def _fake_generate(db, profile, assessment):
+        return {"title": "计划仍可用", "weeks": 4, "days_per_week": 3, "items": []}
+
+    monkeypatch.setattr("app.agent.planner.generate_plan", _fake_generate)
+
+    # 计划生成未超额，应放行
+    resp = client.post(
+        "/api/fitness/plans/generate", headers=headers, json={"goal": "减脂"}
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 评估超额，402
+    resp2 = client.post(
+        "/api/fitness/assess",
+        headers=headers,
+        files={"file": ("a.jpg", b"fakepng", "image/png")},
+    )
+    assert resp2.status_code == 402
+    assert resp2.json()["detail"]["feature"] == "assess"
 
 
 def test_anonymous_blocked(client):
@@ -51,7 +181,7 @@ def test_anonymous_blocked(client):
     assert resp.status_code == 401
 
 
-# ---------- GET /api/membership 会员态查询 ----------
+# ---------- GET /api/membership 会员态与配额 ----------
 def test_membership_free_default(client, register_user):
     headers, _ = register_user()
     resp = client.get("/api/membership", headers=headers)
@@ -62,6 +192,37 @@ def test_membership_free_default(client, register_user):
     assert data["is_pro"] is False
     assert data["features_locked"] is True
     assert data["expire_at"] is None
+    # 配额字段
+    q = data["quota"]
+    assert set(q.keys()) == {"assess", "generate_plan"}
+    for feat in ("assess", "generate_plan"):
+        assert q[feat]["limit"] == settings.free_quota_per_month
+        assert q[feat]["used"] == 0
+        assert q[feat]["remaining"] == settings.free_quota_per_month
+        assert q[feat]["reset_at"] is not None
+
+
+def test_membership_quota_reflects_usage(client, register_user, db_session):
+    headers, user = register_user()
+    _seed_assessments(db_session, user["id"], 3)
+    _seed_plans(db_session, user["id"], 1)
+    data = client.get("/api/membership", headers=headers).json()
+    assert data["quota"]["assess"]["used"] == 3
+    assert data["quota"]["assess"]["remaining"] == settings.free_quota_per_month - 3
+    assert data["quota"]["generate_plan"]["used"] == 1
+    assert data["quota"]["generate_plan"]["remaining"] == settings.free_quota_per_month - 1
+
+
+def test_membership_pro_quota_unlimited(client, register_user, db_session):
+    """PRO 用户 remaining 为 null（不限次），但仍展示已用次数。"""
+    headers, user = register_user()
+    _grant_pro(db_session, user["id"])
+    _seed_assessments(db_session, user["id"], 99)
+    data = client.get("/api/membership", headers=headers).json()
+    assert data["is_pro"] is True
+    assert data["features_locked"] is False
+    assert data["quota"]["assess"]["used"] == 99
+    assert data["quota"]["assess"]["remaining"] is None
 
 
 def test_membership_anonymous_401(client):
@@ -72,7 +233,7 @@ def test_membership_reflects_pro_after_payment(client, register_user, db_session
     import hashlib
     import hmac
 
-    from app.core.config import settings
+    from app.core.config import settings as app_settings
 
     headers, user = register_user()
     _grant_pro(db_session, user["id"])
@@ -103,7 +264,6 @@ def test_pro_user_generate_plan_passes(client, register_user, db_session, monkey
     headers, user = register_user()
     _grant_pro(db_session, user["id"])
 
-    # mock 掉 AI planner，避免外网调用
     async def _fake_generate(db, profile, assessment):
         return {"title": "测试计划", "weeks": 4, "days_per_week": 3, "items": []}
 
@@ -116,15 +276,15 @@ def test_pro_user_generate_plan_passes(client, register_user, db_session, monkey
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["title"] == "测试计划"
+    # PRO 不限次，不返回 X-Quota-Remaining 数值（剩余为无限语义，不写该头）
+    assert "x-quota-remaining" not in {k.lower() for k in resp.headers.keys()}
 
 
 def test_pro_user_assess_passes(client, register_user, db_session, monkeypatch, tmp_path):
     headers, user = register_user()
     _grant_pro(db_session, user["id"])
 
-    # 真实 PNG（1x1），通过 magic bytes/Pillow 校验
     import io
-
     from PIL import Image
 
     buf = io.BytesIO()
@@ -141,6 +301,7 @@ def test_pro_user_assess_passes(client, register_user, db_session, monkeypatch, 
         }
 
     monkeypatch.setattr("app.agent.qwen_vl_client.assess_body", _fake_assess)
+    monkeypatch.setattr("pathlib.Path.write_bytes", lambda self, data: None)
 
     resp = client.post(
         "/api/fitness/assess",
@@ -151,16 +312,55 @@ def test_pro_user_assess_passes(client, register_user, db_session, monkeypatch, 
     assert resp.json()["direction"] == "gain"
 
 
-# ---------- 过期 pro 视为 free ----------
-def test_expired_pro_blocked(client, register_user, db_session):
+# ---------- 过期 pro 视为 free（受额度约束）----------
+def test_expired_pro_blocked_when_quota_exhausted(client, register_user, db_session):
     headers, user = register_user()
-    _grant_pro(db_session, user["id"], days=-1)  # 已过期
+    _grant_pro(db_session, user["id"], days=-1)  # 已过期 → 按 free 计额度
+    _seed_plans(db_session, user["id"], settings.free_quota_per_month)
     resp = client.post(
         "/api/fitness/plans/generate",
         headers=headers,
         json={"goal": "增肌"},
     )
     assert resp.status_code == 402
+    assert resp.json()["detail"]["error"] == "quota_exhausted"
+
+
+# ---------- 跨月重置（直接测计数函数，冻结时间）----------
+def test_quota_resets_across_months(db_session, register_user):
+    _, user = register_user()
+    user_id = user["id"]
+    from app.services import membership_service
+
+    # 在"上个月"造 5 条评估记录
+    now = datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc)
+    last_month = datetime(2026, 7, 31, 23, 0, tzinfo=timezone.utc)
+    for _ in range(settings.free_quota_per_month):
+        rec = BodyAssessment(
+            user_id=user_id, media_path="uploads/old.jpg", media_type="image"
+        )
+        rec.created_at = last_month
+        db_session.add(rec)
+    db_session.commit()
+
+    # 本月计数应为 0（跨月重置）
+    assert membership_service.quota_used(db_session, user_id, "assess", now=now) == 0
+    status = membership_service.check_quota(db_session, user_id, "assess", now=now)
+    assert status["used"] == 0
+    assert status["remaining"] == settings.free_quota_per_month
+    assert status["exhausted"] is False
+    # reset_at 为次月 1 日
+    assert status["reset_at"] == datetime(2026, 9, 1, tzinfo=timezone.utc)
+
+
+def test_quota_month_boundary_wraps_december(db_session, register_user):
+    from app.services import membership_service
+
+    _, user = register_user()
+    dec = datetime(2026, 12, 31, 23, 59, tzinfo=timezone.utc)
+    start, next_start = membership_service.month_bounds(dec)
+    assert start == datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert next_start == datetime(2027, 1, 1, tzinfo=timezone.utc)
 
 
 # ---------- 支付沙箱链路后即可调用被门控接口 ----------

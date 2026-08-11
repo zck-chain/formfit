@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     rate_limit_generate_plan: str = "20/minute"
     rate_limit_create_order: str = "30/minute"
 
+    # ---- 免费档月度配额 ----
+    # 免费用户每个 PRO 功能（体态评估 / AI 计划生成）每月可用次数（按自然月 UTC）。
+    # 设为 0 表示免费档完全无额度（等同硬门控）；PRO 用户不受此限。
+    free_quota_per_month: int = 5
+
     # ---- 支付 ----
     # 启用的渠道，逗号分隔：sandbox,apple,alipay,wechat（首发渠道待产品确认）
     payment_channels: str = "sandbox"
@@ -117,7 +122,17 @@ class Settings(BaseSettings):
     # 微信支付（预留）
     wechat_app_id: str = ""
     wechat_mch_id: str = ""
+    # APIv3 密钥（32 字节），用于回调解密 AES-256-GCM
     wechat_api_v3_key: str = ""
+    # 微信支付平台证书/公钥（PEM 文本），用于校验回调 Wechatpay-Signature。
+    # 生产应通过微信平台证书下载器定期轮换；这里支持直接注入一份当前生效的证书。
+    wechat_platform_cert: str = ""
+    # 商户 API 私钥（PEM，apiclient_key.pem 内容），用于请求签名
+    wechat_mch_private_key: str = ""
+    # 商户证书序列号
+    wechat_mch_serial_no: str = ""
+    # 微信支付回调通知地址
+    wechat_notify_url: str = ""
 
     # ---- 派生属性 ----
     @property
