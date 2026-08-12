@@ -28,12 +28,17 @@ def _as_aware(dt: datetime | None) -> datetime | None:
 
 
 def is_membership_active(m: Membership | None, now: datetime | None = None) -> bool:
-    """会员是否处于有效状态：已激活且未到期。"""
+    """会员是否处于有效状态：已激活且未到期。
+
+    - expire_at 为 None 表示永久有效（管理员可人工发放「永不过期」的 PRO）。
+    - expire_at 非空则须晚于当前时间。
+    """
     if not m or not m.is_active:
         return False
     expire_at = _as_aware(m.expire_at)
     if expire_at is None:
-        return False
+        # 已激活且无到期时间 = 永久会员
+        return True
     return expire_at > (now or datetime.now(timezone.utc))
 
 
