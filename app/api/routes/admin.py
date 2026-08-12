@@ -1,7 +1,7 @@
 """Web 管理后台路由：登录、看板、用户、订阅、动作库管理。"""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Form, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -12,7 +12,7 @@ from app.core.config import BASE_DIR, settings
 from app.core.security import verify_password
 from app.db.session import get_db
 from app.models import Exercise, Membership, Plan, User
-from app.services import admin_service, exercise_service as svc
+from app.services import admin_audit, admin_service, exercise_service as svc
 
 router = APIRouter(tags=["admin"])
 templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
@@ -161,12 +161,57 @@ def users_page(
 
 
 @router.post("/admin/users/{user_id}/toggle")
-def toggle_user(user_id: int, request: Request, db: Session = Depends(get_db)):
-    require_admin(request, db)
+def toggle_user(
+    user_id: int,
+    request: Request,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+):
+    admin = require_admin(request, db)
     user = db.get(User, user_id)
-    if not user or user.role == "admin":
-        raise HTTPException(status_code=400, detail="不能操作管理员")
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if user.role == "admin":
+        # 管理员账号不得被停/启用，防止越权或自锁。
+        raise HTTPException(status_code=403, detail="不能操作管理员")
+
+    action = "toggle_user"
+    replay = admin_audit.is_replay(
+        db,
+        admin_id=admin.id,
+        action=action,
+        target_user_id=user_id,
+        idempotency_key=idempotency_key,
+    )
+    before = admin_audit.snapshot_user(user)
+    if replay:
+        # 幂等命中：不重复翻转，只记一条命中审计（保留留痕，不改变状态）。
+        admin_audit.record_event(
+            db,
+            admin_id=admin.id,
+            action=action,
+            target_user_id=user_id,
+            before=before,
+            after={**before, "idempotency_replay": True},
+            reason=None,
+            idempotency_key=idempotency_key,
+        )
+        db.commit()
+        return RedirectResponse("/admin/users", status_code=303)
+
     user.is_active = not user.is_active
+    db.flush()
+    after = admin_audit.snapshot_user(user)
+    admin_audit.record_event(
+        db,
+        admin_id=admin.id,
+        action=action,
+        target_user_id=user_id,
+        before=before,
+        after=after,
+        reason=None,
+        idempotency_key=idempotency_key,
+    )
     db.commit()
     return RedirectResponse("/admin/users", status_code=303)
 
@@ -187,31 +232,165 @@ def membership_page(request: Request, db: Session = Depends(get_db)):
     )
 
 
+def _get_non_admin_target(db: Session, user_id: int) -> User:
+    """取目标用户；不存在 → 404，目标为管理员 → 403（禁止管理员间互相操作）。"""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if user.role == "admin":
+        raise HTTPException(status_code=403, detail="不能操作管理员")
+    return user
+
+
 @router.post("/admin/membership/{user_id}")
 def grant_membership(
     user_id: int,
     request: Request,
     plan: str = Form("pro"),
-    days: int = Form(30),
+    days: int | None = Form(None),
+    reason: str | None = Form(None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     db: Session = Depends(get_db),
 ):
-    require_admin(request, db)
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404)
+    admin = require_admin(request, db)
+    user = _get_non_admin_target(db, user_id)
+
+    reason = (reason or "").strip()
+    if not reason:
+        # 事由必填：所有人工发放必须可追溯。
+        raise HTTPException(status_code=400, detail="发放会员必须填写 reason（操作事由）")
+    if plan not in ("free", "pro"):
+        raise HTTPException(status_code=400, detail="plan 仅支持 free / pro")
+
+    action = "grant_membership"
     m = user.membership
+    before = admin_audit.snapshot_membership(m)
+
+    replay = admin_audit.is_replay(
+        db,
+        admin_id=admin.id,
+        action=action,
+        target_user_id=user_id,
+        idempotency_key=idempotency_key,
+    )
+    if replay:
+        admin_audit.record_event(
+            db,
+            admin_id=admin.id,
+            action=action,
+            target_user_id=user_id,
+            before=before,
+            after={**before, "idempotency_replay": True},
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        db.commit()
+        return RedirectResponse("/admin/membership", status_code=303)
+
     if not m:
         m = Membership(user_id=user.id)
         db.add(m)
+    now = datetime.now(timezone.utc)
     m.plan = plan
     m.is_active = plan == "pro"
-    now = datetime.now(timezone.utc)
     m.start_at = now
     if plan == "pro":
-        from datetime import timedelta
-        m.expire_at = now + timedelta(days=days)
+        # days 为空或 0 表示永久：expire_at 置空（is_membership_active 对 pro 永久需特殊判定，
+        # 见下）。days > 0 则按天到期。
+        if days and days > 0:
+            m.expire_at = now + timedelta(days=days)
+        else:
+            m.expire_at = None
     else:
+        # 降级回 free：立即到期。
         m.expire_at = now
+
+    db.flush()
+    after = admin_audit.snapshot_membership(m)
+    admin_audit.record_event(
+        db,
+        admin_id=admin.id,
+        action=action,
+        target_user_id=user_id,
+        before=before,
+        after=after,
+        reason=reason,
+        idempotency_key=idempotency_key,
+    )
+    db.commit()
+    return RedirectResponse("/admin/membership", status_code=303)
+
+
+@router.post("/admin/membership/{user_id}/revoke")
+def revoke_membership(
+    user_id: int,
+    request: Request,
+    reason: str | None = Form(None),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db: Session = Depends(get_db),
+):
+    """收回 PRO：不物理删除会员行，而是置 is_active=false 并把 expire_at 设为当前时间，
+    同时写审计留痕（before/after 快照），支持撤销追溯。"""
+    admin = require_admin(request, db)
+    user = _get_non_admin_target(db, user_id)
+
+    reason = (reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="收回会员必须填写 reason（操作事由）")
+
+    action = "revoke_membership"
+    m = user.membership
+    before = admin_audit.snapshot_membership(m)
+
+    replay = admin_audit.is_replay(
+        db,
+        admin_id=admin.id,
+        action=action,
+        target_user_id=user_id,
+        idempotency_key=idempotency_key,
+    )
+    if replay:
+        admin_audit.record_event(
+            db,
+            admin_id=admin.id,
+            action=action,
+            target_user_id=user_id,
+            before=before,
+            after={**before, "idempotency_replay": True},
+            reason=reason,
+            idempotency_key=idempotency_key,
+        )
+        db.commit()
+        return RedirectResponse("/admin/membership", status_code=303)
+
+    now = datetime.now(timezone.utc)
+    if not m:
+        # 本就没有会员行：建一条 free 占位并立即失活，仍写审计记录这次收回动作。
+        m = Membership(
+            user_id=user.id,
+            plan="free",
+            is_active=False,
+            start_at=now,
+            expire_at=now,
+        )
+        db.add(m)
+    else:
+        m.is_active = False
+        m.expire_at = now
+        m.plan = "free"
+
+    db.flush()
+    after = admin_audit.snapshot_membership(m)
+    admin_audit.record_event(
+        db,
+        admin_id=admin.id,
+        action=action,
+        target_user_id=user_id,
+        before=before,
+        after=after,
+        reason=reason,
+        idempotency_key=idempotency_key,
+    )
     db.commit()
     return RedirectResponse("/admin/membership", status_code=303)
 
