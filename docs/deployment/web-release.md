@@ -28,7 +28,7 @@ Web 静态产物这一层。
 | `/` 及其余 | Flutter Web | `build/web`，深链回退 `/index.html` |
 
 Nginx 配置示例见仓库 `deploy/nginx/formfit-web.conf`（安全头片段在
-`deploy/nginx/snippets/security_headers.conf`，部署时放到 nginx prefix 下的
+`deploy/nginx/snippets/formfit-security-headers.conf`，部署时放到 nginx prefix 下的
 `snippets/`，或把其中 4 行 `add_header` 内联）。**路由顺序是评审重点**：所有反代
 前缀必须位于 `/` 静态 + SPA fallback 之前，否则 `/api/...`、`/admin/...` 会被
 `try_files` 的 `/index.html` 吞掉，返回 200(HTML) 而非 JSON/后台页面（后台表单 POST
@@ -43,7 +43,7 @@ Nginx 配置示例见仓库 `deploy/nginx/formfit-web.conf`（安全头片段在
   内容哈希**，绝不能 immutable，否则发版后客户端拿不到新包）。
 
 安全响应头（HSTS、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`）集中在
-`deploy/nginx/snippets/security_headers.conf`，在 server 级和每个自带 `add_header` 的静态
+`deploy/nginx/snippets/formfit-security-headers.conf`，在 server 级和每个自带 `add_header` 的静态
 location 各 include 一次，避免 nginx 的 `add_header` 继承陷阱导致关键响应丢失安全头。
 CSP（内容安全策略）**留待 W6-1 认证硬化**统一处理：应用依赖 `google_fonts`，运行时可能拉
 `fonts.googleapis.com`/`fonts.gstatic.com`，需边测边收紧，过严会挡字体（届时切 Cookie 一起做）。
