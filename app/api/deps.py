@@ -1,9 +1,14 @@
-"""鉴权依赖：从 Bearer token 解析当前用户。"""
-from fastapi import Depends, HTTPException, Response, status
+"""鉴权依赖：Bearer 优先、Cookie 兜底，并对 Cookie 写操作做 CSRF 校验。"""
+from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_token
+from app.core.web_auth import (
+    csrf_required,
+    read_session_token,
+    validate_csrf,
+)
 from app.db.session import get_db
 from app.models import User
 from app.services import membership_service
@@ -11,17 +16,41 @@ from app.services import membership_service
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 
+def csrf_protect(request: Request) -> None:
+    """Cookie 认证下的写操作必须通过双提交 CSRF 校验。
+
+    - Bearer 认证（native）不依赖 cookie，浏览器不会自动附带，免校验；
+    - 安全方法（GET/HEAD/OPTIONS）不改变状态，免校验；
+    - 仅当请求靠会话 cookie 认证且为写方法时，比对 X-CSRF-Token 头与 csrftoken cookie，
+      缺失/不匹配一律 403 csrf_failed（常量时间比较在 web_auth.validate_csrf 内）。
+    """
+    if not csrf_required(request):
+        return
+    if not validate_csrf(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "csrf_failed"},
+        )
+
+
 def get_current_user(
+    request: Request,
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    if not token:
+    # CSRF 在认证之前校验：cookie 写操作缺/错 CSRF 应直接 403，
+    # 而不是走到 401 暴露「该 cookie 是否对应有效用户」。
+    csrf_protect(request)
+
+    # oauth2_scheme 已解析 Bearer；若它没拿到（cookie 链路），再从 cookie 兜底。
+    resolved = token if token else read_session_token(request)
+    if not resolved:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="未登录",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    payload = decode_token(token)
+    payload = decode_token(resolved)
     if not payload or "sub" not in payload:
         raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
     user = db.get(User, int(payload["sub"]))
@@ -37,13 +66,20 @@ def get_current_admin(user: User = Depends(get_current_user)) -> User:
 
 
 def get_optional_user(
+    request: Request,
     token: str | None = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User | None:
-    """可选登录：用于公开接口，未登录返回 None。"""
-    if not token:
+    """可选登录：用于公开接口，未登录返回 None。
+
+    Cookie 链路的写操作同样要过 CSRF（虽然当前没有写接口用本依赖，
+    保留一致性以防未来误用导致越权伪造）。
+    """
+    csrf_protect(request)
+    resolved = token if token else read_session_token(request)
+    if not resolved:
         return None
-    payload = decode_token(token)
+    payload = decode_token(resolved)
     if not payload:
         return None
     return db.get(User, int(payload["sub"]))
