@@ -10,12 +10,19 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import request_id_ctx
 from app.models import Membership, User
-from app.models.admin_audit import AdminAuditEvent
+from app.models.admin_audit import AdminAuditEvent, ADMIN_ACTIONS
+
+# 动作 -> 中文展示名（后台审计页用）
+ACTION_ZH = {
+    "grant_membership": "发放会员",
+    "revoke_membership": "收回会员",
+    "toggle_user": "启用/停用用户",
+}
 
 # 幂等去重窗口：同一 admin 对同一 target 的同一动作、携带相同 Idempotency-Key，
 # 在该窗口内视为重复提交，不再重复执行（v1 单管理员自用，窗口取 5 分钟足够覆盖表单双击）。
@@ -111,3 +118,86 @@ def record_event(
     )
     db.add(event)
     return event
+
+
+# ---------- 查询 / 序列化 ----------
+# 序列化白名单：只输出这些字段，绝不含密码哈希/密钥/Cookie/Authorization。
+# before/after 本身即写入时的白名单小快照（snapshot_*），此处原样透传。
+def serialize_event(
+    event: AdminAuditEvent,
+    admin: User | None = None,
+    target: User | None = None,
+) -> dict[str, Any]:
+    """把审计事件序列化为 UI/API 友好的 dict。admin/target 用于补全邮箱展示。"""
+    return {
+        "id": event.id,
+        "created_at": _iso(event.created_at),
+        "admin_id": event.admin_id,
+        "admin_email": getattr(admin, "email", None),
+        "action": event.action,
+        "action_label": ACTION_ZH.get(event.action, event.action),
+        "target_user_id": event.target_user_id,
+        "target_email": getattr(target, "email", None),
+        "reason": event.reason,
+        "before": event.before_json or {},
+        "after": event.after_json or {},
+        "request_id": event.request_id,
+        "idempotency_key": event.idempotency_key,
+    }
+
+
+def list_events(
+    db: Session,
+    *,
+    action: str | None = None,
+    admin_id: int | None = None,
+    target_user_id: int | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict[str, Any]], int]:
+    """分页查询审计事件，按 id 倒序（最新在前）。
+
+    返回 (items, total)；items 为已序列化 dict 列表，附带操作者/目标邮箱。
+    用两条 in_ 查询批量补全用户信息，避免 N+1。
+    """
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
+
+    stmt = select(AdminAuditEvent)
+    if action:
+        stmt = stmt.where(AdminAuditEvent.action == action)
+    if admin_id:
+        stmt = stmt.where(AdminAuditEvent.admin_id == admin_id)
+    if target_user_id:
+        stmt = stmt.where(AdminAuditEvent.target_user_id == target_user_id)
+    if start is not None:
+        stmt = stmt.where(AdminAuditEvent.created_at >= start)
+    if end is not None:
+        stmt = stmt.where(AdminAuditEvent.created_at <= end)
+
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    events = db.scalars(
+        stmt.order_by(AdminAuditEvent.id.desc())
+        .limit(page_size)
+        .offset((page - 1) * page_size)
+    ).all()
+
+    # 批量解析操作者/目标用户邮箱（单次 in_ 查询）
+    user_ids: set[int] = set()
+    for e in events:
+        user_ids.add(e.admin_id)
+        user_ids.add(e.target_user_id)
+    users: dict[int, User] = {}
+    if user_ids:
+        users = {
+            u.id: u
+            for u in db.scalars(select(User).where(User.id.in_(user_ids))).all()
+        }
+
+    items = [
+        serialize_event(e, users.get(e.admin_id), users.get(e.target_user_id))
+        for e in events
+    ]
+    return items, total
