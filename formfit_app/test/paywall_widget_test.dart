@@ -104,6 +104,71 @@ void main() {
     expect(find.text('恢复购买'), findsOneWidget);
   });
 
+  testWidgets('Web 下隐藏下单 CTA/恢复购买/套餐，展示联系管理员提示',
+      (tester) async {
+    _useLargeViewport(tester);
+    final repo = FakeApiRepository();
+    final container = ProviderContainer(overrides: [
+      apiRepositoryProvider.overrideWithValue(repo),
+      tokenStoreProvider.overrideWithValue(TokenStore()..setToken('t')),
+      // 模拟 Web 构建：v1 自助下单关闭。
+      selfServiceCheckoutEnabledProvider.overrideWithValue(false),
+    ]);
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: PaywallScreen()),
+      ),
+    );
+    await tester.flush();
+
+    // 不渲染真实下单 CTA 与 Apple「恢复购买」入口。
+    expect(find.text('立即开通 PRO'), findsNothing);
+    expect(find.text('恢复购买'), findsNothing);
+    // 不渲染可下单的套餐/渠道选择。
+    expect(find.text('Pro 月度会员'), findsNothing);
+    expect(find.text('Pro 年度会员'), findsNothing);
+    expect(find.text('选择套餐'), findsNothing);
+    // 展示关闭说明。
+    expect(find.text('PRO 暂未开放自助开通，请联系管理员'), findsOneWidget);
+    // 未发起任何下单请求（控制器也未加载套餐/渠道）。
+    expect(repo.createOrderCalls, 0);
+    expect(repo.confirmCalls, 0);
+  });
+
+  testWidgets('native（自助下单开启）下 CTA 与恢复购买入口仍在',
+      (tester) async {
+    _useLargeViewport(tester);
+    final repo = FakeApiRepository();
+    final container = ProviderContainer(overrides: [
+      apiRepositoryProvider.overrideWithValue(repo),
+      tokenStoreProvider.overrideWithValue(TokenStore()..setToken('t')),
+      orderPollerProvider.overrideWithValue(
+        OrderPoller((_) async => const OrderStatus(
+            orderNo: 'x',
+            status: OrderStatuses.fulfilled,
+            isActive: true)),
+      ),
+      // 显式模拟 native：下单入口保持不变（回归保护）。
+      selfServiceCheckoutEnabledProvider.overrideWithValue(true),
+    ]);
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: PaywallScreen()),
+      ),
+    );
+    await tester.flush();
+
+    expect(find.text('立即开通 PRO'), findsOneWidget);
+    expect(find.text('恢复购买'), findsOneWidget);
+    expect(find.text('Pro 年度会员'), findsOneWidget);
+  });
+
   test('isProRequiredError 识别 402 与 403 pro_required', () {
     expect(
       isProRequiredError(ApiException('x', statusCode: 402)),
