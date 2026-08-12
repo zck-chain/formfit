@@ -24,6 +24,8 @@ dependencies:
 
   # 图片选择/拍照
   image_picker: ^1.1.2
+  # image_picker 返回的跨平台文件抽象（XFile），API 层直接依赖以解耦 picker
+  cross_file: ^0.3.4+2
 
   # Apple 内购（iOS/macOS）
   in_app_purchase: ^3.2.0

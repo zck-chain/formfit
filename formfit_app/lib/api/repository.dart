@@ -1,6 +1,6 @@
-import 'dart:io';
-
+import 'package:cross_file/cross_file.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/assessment.dart';
@@ -46,14 +46,15 @@ class ApiRepository {
 
   // ---- 拍照评估 ----
   Future<Assessment> assess({
-    required File image,
+    required XFile image,
     double? heightCm,
     double? weightKg,
     int? age,
     String? gender,
   }) async {
+    final file = await buildAssessMultipartFile(image: image, isWeb: kIsWeb);
     final form = FormData.fromMap({
-      'file': await MultipartFile.fromFile(image.path, filename: 'photo.jpg'),
+      'file': file,
       if (heightCm != null) 'height_cm': heightCm.toString(),
       if (weightKg != null) 'weight_kg': weightKg.toString(),
       if (age != null) 'age': age.toString(),
@@ -173,6 +174,29 @@ class ApiRepository {
     });
     return PaymentOrder.fromJson(res.data as Map<String, dynamic>);
   }
+}
+
+/// 构建评估接口的图片 multipart 分片。
+///
+/// 抽出为顶层函数是为了在单元测试里分别覆盖 Web 与 native 分支
+/// （[kIsWeb] 是编译期常量，运行时无法切换）：
+/// - Web（[isWeb]=true）没有文件系统路径，用 [XFile.readAsBytes] +
+///   [MultipartFile.fromBytes]；
+/// - native（[isWeb]=false）走 [MultipartFile.fromFile]。
+///
+/// 字段名固定为后端契约要求的 `file`，文件名缺省回退 `photo.jpg`。
+Future<MultipartFile> buildAssessMultipartFile({
+  required XFile image,
+  required bool isWeb,
+}) async {
+  final filename = image.name.isNotEmpty ? image.name : 'photo.jpg';
+  if (isWeb) {
+    return MultipartFile.fromBytes(
+      await image.readAsBytes(),
+      filename: filename,
+    );
+  }
+  return MultipartFile.fromFile(image.path, filename: filename);
 }
 
 final apiRepositoryProvider = Provider<ApiRepository>((ref) {
