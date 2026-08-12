@@ -1,8 +1,10 @@
 
 import 'dart:async';
-import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+
+import '../../core/platform/platform.dart';
 
 /// 内购服务抽象：购买/恢复后返回服务端可校验的票据。
 ///
@@ -117,10 +119,13 @@ class AppleInAppPurchase implements InAppPurchaseService {
   }
 }
 
-/// 根据平台返回内购实现：iOS/macOS 用 StoreKit，其余返回不可用占位。
+/// 根据平台返回内购实现：iOS/macOS 用 StoreKit，其余（含 Web）返回不可用占位。
+///
+/// `kIsWeb` 短路优先；`dart:io` 的 `Platform` 判定被收敛到条件导入
+/// （`core/platform`），Web 构建树不会直接引用 `Platform`。
 InAppPurchaseService createInAppPurchase() {
-  if (Platform.isIOS || Platform.isMacOS) {
-    return AppleInAppPurchase();
+  if (kIsWeb || !isApplePlatform()) {
+    return const UnavailableInAppPurchase();
   }
-  return const UnavailableInAppPurchase();
+  return AppleInAppPurchase();
 }
