@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -21,7 +22,7 @@ class AssessmentScreen extends ConsumerStatefulWidget {
 }
 
 class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
-  File? _image;
+  XFile? _image;
   bool _analyzing = false;
   Assessment? _result;
   String? _error;
@@ -35,7 +36,7 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
     );
     if (x == null) return;
     setState(() {
-      _image = File(x.path);
+      _image = x;
       _result = null;
       _error = null;
     });
@@ -165,7 +166,13 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
             ? Stack(
                 fit: StackFit.expand,
                 children: [
-                  Image.file(_image!, fit: BoxFit.cover),
+                  // Web 上 XFile.path 是 blob URL，用 Image.network；
+                  // native 走文件路径 Image.file。kIsWeb 为编译期常量，
+                  // 另一分支会被 tree-shake，dart:io 的 File 不会进入 Web 构建树。
+                  if (kIsWeb)
+                    Image.network(_image!.path, fit: BoxFit.cover)
+                  else
+                    Image.file(File(_image!.path), fit: BoxFit.cover),
                   Positioned(
                     right: 10,
                     top: 10,
