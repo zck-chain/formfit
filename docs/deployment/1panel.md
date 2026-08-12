@@ -128,6 +128,12 @@ docker logs -f formfit
 
 后端启动参数带 `--proxy-headers`，会正确识别反代注入的 `X-Forwarded-Proto`。
 
+> 上述是「`api` 子域名只代理后端」的形态。若要把 Flutter Web/PWA 与后端部署在
+> **同一域名**（`/api`、`/media`、`/static` 反代后端，其余路径托管 `build/web`，
+> SPA 深链刷新不 404），使用仓库 `deploy/nginx/formfit-web.conf`，构建/发布/回滚
+> 步骤见 [`web-release.md`](./web-release.md)。两者二选一，不要把 80/443 同时配给
+> 两套 server 块。
+
 ## 5. 每日备份与腾讯云 COS
 
 ### 5.1 数据库快照（应用一致性）
