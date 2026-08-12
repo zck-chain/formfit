@@ -28,6 +28,18 @@ flutter run --dart-define=API_BASE_URL=http://192.168.x.x:8000
 
 > Android 模拟器访问宿主机后端需用 `10.0.2.2`；iOS 模拟器用 `127.0.0.1`；真机用电脑局域网 IP。地址通过 `--dart-define=API_BASE_URL=...` 覆盖，见 `lib/core/config.dart`。
 
+### Web / PWA
+
+```bash
+# 开发：Chrome 连本地后端（需后端 CORS 放行 localhost）
+flutter run -d chrome
+
+# 生产同源部署：传空串，Dio 走相对路径 /api/...
+flutter build web --dart-define=API_BASE_URL=
+```
+
+> 生产环境前后端同源（如由同一域名/反向代理托管）时用空串即可；若 Web 与后端不同域，传后端完整 origin 并配置 CORS。图片上传在 Web 上以字节流（`MultipartFile.fromBytes`）提交，`POST /api/fitness/assess` 字段名仍为 `file`，契约不变。
+
 ## 工程基线
 
 ```bash
