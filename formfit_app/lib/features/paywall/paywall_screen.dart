@@ -41,6 +41,7 @@ class PaywallScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(paymentControllerProvider);
     final controller = ref.read(paymentControllerProvider.notifier);
+    final selfCheckout = ref.watch(selfServiceCheckoutEnabledProvider);
 
     // 支付/恢复成功后关闭并回传 true。
     ref.listen(paymentControllerProvider, (_, next) {
@@ -57,11 +58,15 @@ class PaywallScreen extends ConsumerWidget {
             children: [
               _topBar(context),
               Expanded(
-                child: state.isLoading
-                    ? const Center(child: CircularProgressIndicator())
-                    : state.stage == PurchaseStage.error && state.plans.isEmpty
-                        ? _loadError(controller, state.message)
-                        : _content(context, controller, state),
+                child: !selfCheckout
+                    ? _webClosedContent(
+                        context, reason ?? const PaywallReason())
+                    : state.isLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : state.stage == PurchaseStage.error &&
+                                state.plans.isEmpty
+                            ? _loadError(controller, state.message)
+                            : _content(context, controller, state),
               ),
             ],
           ),
@@ -158,6 +163,53 @@ class PaywallScreen extends ConsumerWidget {
               'Apple 内购通过 App Store 管理订阅与续费。如遇问题请使用「恢复购买」。',
         ),
       ],
+    );
+  }
+
+  /// Web（v1 自助下单关闭）下的只读内容：保留卖点展示，但不渲染任何
+  /// 真实下单 CTA、渠道选择、套餐选择或「恢复购买」入口，改为提示联系
+  /// 管理员。与 native 购买流程完全隔离，不发起下单请求。
+  Widget _webClosedContent(BuildContext context, PaywallReason r) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+      children: [
+        _hero(r),
+        const SizedBox(height: 22),
+        _features(),
+        const SizedBox(height: 24),
+        _closedNotice(),
+      ],
+    );
+  }
+
+  Widget _closedNotice() {
+    return HudCard(
+      cornerColor: AppColors.warning,
+      glow: false,
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.lock_outline_rounded,
+                  size: 20, color: AppColors.warning),
+              const SizedBox(width: 8),
+              Text('自助开通暂未开放',
+                  style: AppTheme.display(15, weight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'PRO 暂未开放自助开通，请联系管理员',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
