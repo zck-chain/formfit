@@ -60,6 +60,19 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24 * 7  # 7 天
 
+    # ---- Web Cookie 会话（ADR-4：与 Bearer JWT 共存）----
+    # 浏览器端会话 cookie 名（HttpOnly，承载与 App 完全相同的 JWT），作用域 /api。
+    web_cookie_name: str = "ff_session"
+    # CSRF 双提交 cookie 名（**不加** HttpOnly，供前端 JS 读取后回填 X-CSRF-Token）。
+    csrf_cookie_name: str = "csrftoken"
+    # cookie 作用路径：仅在 /api 下携带，缩小暴露面。
+    web_cookie_path: str = "/api"
+    # 是否给会话 cookie 加 Secure。None 表示跟随 is_production（生产 true，本地 HTTP 开发 false）。
+    # 显式设置 WEB_COOKIE_SECURE=true/false 可覆盖。
+    web_cookie_secure: bool | None = None
+    # SameSite 策略：Lax 允许顶层导航带 cookie，跨站 POST 不携带，兼顾 PWA 跳转与 CSRF 防护。
+    web_cookie_samesite: str = "lax"
+
     # 管理员
     admin_email: str = "admin@formfit.local"
     admin_password: str = "change-me-admin"
@@ -152,6 +165,13 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env.strip().lower() == "production"
+
+    @property
+    def web_cookie_secure_effective(self) -> bool:
+        """会话 cookie 是否加 Secure：显式配置优先，否则生产 true、本地 HTTP 开发 false。"""
+        if self.web_cookie_secure is not None:
+            return self.web_cookie_secure
+        return self.is_production
 
     @property
     def is_sqlite(self) -> bool:
