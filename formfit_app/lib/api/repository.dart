@@ -10,17 +10,51 @@ import '../models/user.dart';
 import 'api_client.dart';
 
 /// 统一的后端数据访问层
+///
+/// [_dio] 是带认证/CSRF 拦截器的主客户端；[bareDio] 不带这些拦截器，仅供
+/// Web cookie 认证三个端点（web-login / web-logout / csrf）使用，避免
+/// 「获取 csrf 时又被 csrf 拦截器拦截」的递归。未注入时回退到 [_dio]。
 class ApiRepository {
-  ApiRepository(this._dio);
+  ApiRepository(this._dio, {Dio? bareDio}) : _bareDio = bareDio ?? _dio;
   final Dio _dio;
+  final Dio _bareDio;
 
   // ---- 鉴权 ----
+
+  /// native 登录：返回 access_token + user，由调用方持久化 Bearer token。
   Future<Map<String, dynamic>> login(String email, String password) async {
     final res = await _dio.post('/api/auth/login', data: {
       'email': email,
       'password': password,
     });
     return res.data as Map<String, dynamic>;
+  }
+
+  /// Web 登录：后端通过 Set-Cookie 下发 HttpOnly 的 ff_session + csrftoken，
+  /// 响应体仅返回最小用户信息 `{id, email}`（不含 token 字符串）。
+  /// 走 [_bareDio]，此刻尚未建立 cookie 会话，不需要也不应带 CSRF。
+  Future<Map<String, dynamic>> webLogin(String email, String password) async {
+    final res = await _bareDio.post('/api/auth/web-login', data: {
+      'email': email,
+      'password': password,
+    });
+    return res.data as Map<String, dynamic>;
+  }
+
+  /// 获取/轮换 CSRF token，从响应体 `{csrf: <token>}` 取值。
+  /// 走 [_bareDio]（GET 本不触发 CSRF 拦截，这里语义更清晰）。
+  Future<String> fetchCsrf() async {
+    final res =
+        await _bareDio.get<Map<String, dynamic>>('/api/auth/csrf');
+    final token = res.data?['csrf'];
+    if (token is String && token.isNotEmpty) return token;
+    throw StateError('csrf 响应缺少 token');
+  }
+
+  /// Web 登出：后端清除 ff_session / csrftoken（204）。无需要求已登录，
+  /// 故走 [_bareDio]，不在 cookie 状态不明时被 CSRF 拦截器卡住。
+  Future<void> webLogout() async {
+    await _bareDio.post('/api/auth/web-logout');
   }
 
   Future<Map<String, dynamic>> register(
@@ -200,5 +234,8 @@ Future<MultipartFile> buildAssessMultipartFile({
 }
 
 final apiRepositoryProvider = Provider<ApiRepository>((ref) {
-  return ApiRepository(ref.watch(dioProvider));
+  return ApiRepository(
+    ref.watch(dioProvider),
+    bareDio: ref.watch(bareDioProvider),
+  );
 });
