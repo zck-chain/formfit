@@ -1,9 +1,12 @@
 """本地验证用最小后端（仅 deploy/nginx/docker-compose.verify.yml 使用，勿用于生产）。
 
-它模拟 FormFit FastAPI 的几个关键路由，目的是验证 Nginx 同源反代/静态路由是否正确：
+它模拟 FormFit FastAPI 的关键路由，目的是验证 Nginx 同源反代/静态路由是否正确：
   - GET  /healthz            -> 200 {"status":"ok"}
   - any  /api/...            -> 200 JSON 回显 method/path（证明被反代，而非 SPA HTML）
   - POST /api/fitness/assess -> 200 JSON 回显收到的字节数（证明上传体透传）
+  - GET  /admin/...          -> 200 text/html，带 X-Mock: admin 与 <!-- admin --> 标记
+                                 （证明后台页面被反代，而非 Flutter index.html）
+  - POST /admin/...          -> 200 JSON 回显（证明后台表单写操作不被静态区 405）
   - GET  /media/...          -> 200 返回一张 1x1 PNG（证明素材可经反代访问）
   - GET  /static/...         -> 200 文本（证明 /static 反代）
 """
@@ -15,6 +18,11 @@ PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
     "890000000d49444154789c6360000002000154a24f5f0000000049454e44ae426082"
 )
+
+ADMIN_HTML = (
+    "<!DOCTYPE html><html><head><title>FormFit Admin</title></head>"
+    "<body><!-- admin -->mock admin login page</body></html>"
+).encode()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -29,6 +37,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/healthz":
             self._send_json(200, {"status": "ok"})
+        elif self.path.startswith("/admin"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("X-Mock", "admin")
+            self.send_header("Content-Length", str(len(ADMIN_HTML)))
+            self.end_headers()
+            self.wfile.write(ADMIN_HTML)
         elif self.path.startswith("/media/"):
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
@@ -47,16 +62,27 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send_json(404, {"detail": "not found", "path": self.path})
 
-    def do_POST(self):
+    def _read_body(self) -> int:
         length = int(self.headers.get("Content-Length", "0"))
-        # 把请求体读完（模拟后端接收上传），但不落盘
         remaining = length
         while remaining > 0:
             chunk = self.rfile.read(min(remaining, 65536))
             if not chunk:
                 break
             remaining -= len(chunk)
-        if self.path.startswith("/api/"):
+        return length
+
+    def do_POST(self):
+        length = self._read_body()
+        if self.path.startswith("/admin/") or self.path.startswith("/admin"):
+            # 后台表单写操作（发放/收回 PRO、启停用户、登录）必须反代到后端，
+            # 不能落到静态区返回 405。
+            self._send_json(
+                200,
+                {"proxied": True, "method": "POST", "path": self.path,
+                 "received_bytes": length, "mock": "admin-action"},
+            )
+        elif self.path.startswith("/api/"):
             self._send_json(
                 200,
                 {"proxied": True, "method": "POST", "path": self.path,

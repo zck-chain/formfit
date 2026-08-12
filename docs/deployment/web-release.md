@@ -21,14 +21,18 @@ Web 静态产物这一层。
 | 路径 | 归属 | 说明 |
 |---|---|---|
 | `/api/` | FastAPI | 业务接口（鉴权、评估、计划、支付、会员等） |
+| `/admin` | FastAPI | 运营后台（Jinja2 页面 + 表单写操作：登录、发放/收回 PRO、启停用户）；挂在根路径，不在 `/api` 下，必须单独反代 |
 | `/media/` | FastAPI 静态 | 数据集只读素材（动作 GIF/JPG/视频） |
 | `/static/` | FastAPI 静态 | 后台自带资源 + 用户上传 `/static/uploads`（**写请求必须反代**） |
 | `/healthz` | FastAPI | 存活+数据库探活（注意是根路径，非 `/api/healthz`） |
 | `/` 及其余 | Flutter Web | `build/web`，深链回退 `/index.html` |
 
-Nginx 配置示例见仓库 `deploy/nginx/formfit-web.conf`。**路由顺序是评审重点**：所有反代
-前缀必须位于 `/` 静态 + SPA fallback 之前，否则 `/api/...` 会被 `try_files` 的
-`/index.html` 吞掉，返回 200(HTML) 而非 JSON。
+Nginx 配置示例见仓库 `deploy/nginx/formfit-web.conf`（安全头片段在
+`deploy/nginx/snippets/security_headers.conf`，部署时放到 nginx prefix 下的
+`snippets/`，或把其中 4 行 `add_header` 内联）。**路由顺序是评审重点**：所有反代
+前缀必须位于 `/` 静态 + SPA fallback 之前，否则 `/api/...`、`/admin/...` 会被
+`try_files` 的 `/index.html` 吞掉，返回 200(HTML) 而非 JSON/后台页面（后台表单 POST
+会变成 405）。
 
 缓存策略：
 
@@ -37,6 +41,12 @@ Nginx 配置示例见仓库 `deploy/nginx/formfit-web.conf`。**路由顺序是�
 - `index.html`、`main.dart.js`、`flutter.js`、`flutter_bootstrap.js`、
   `flutter_service_worker.js`、`version.json`、`*Manifest*`：`no-cache`（这些文件**不带
   内容哈希**，绝不能 immutable，否则发版后客户端拿不到新包）。
+
+安全响应头（HSTS、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`）集中在
+`deploy/nginx/snippets/security_headers.conf`，在 server 级和每个自带 `add_header` 的静态
+location 各 include 一次，避免 nginx 的 `add_header` 继承陷阱导致关键响应丢失安全头。
+CSP（内容安全策略）**留待 W6-1 认证硬化**统一处理：应用依赖 `google_fonts`，运行时可能拉
+`fonts.googleapis.com`/`fonts.gstatic.com`，需边测边收紧，过严会挡字体（届时切 Cookie 一起做）。
 
 ## 2. 构建 Web 产物
 
@@ -249,6 +259,13 @@ curl -sS -w "\nhealthz -> %{http_code}\n" $NG/healthz
 # 反代：/api 不被 SPA 吞（应返回 JSON，而非 index.html）
 curl -sS $NG/api/exercises/ 2>/dev/null | head -c 200; echo
 
+# 反代：/admin 运营后台（页面 + 表单写操作都必须反代，不能被 SPA fallback 吞）
+curl -sS -D - "$NG/admin/login" -o /tmp/admin.html \
+  | grep -iE "HTTP/|content-type|x-mock"
+grep -c "<!-- admin -->" /tmp/admin.html   # 期望 1（后端后台标记，非 Flutter index.html）
+# 收回 PRO 的表单 POST 必须透传到后端，而不是被静态区返回 405
+curl -sS -X POST "$NG/admin/membership/1/revoke" -F "reason=test" ; echo
+
 # 反代：/media 数据集素材
 curl -sS -o /dev/null -w "GET /media        -> %{http_code}\n" $NG/media/exercises/images/
 
@@ -256,6 +273,9 @@ curl -sS -o /dev/null -w "GET /media        -> %{http_code}\n" $NG/media/exercis
 dd if=/dev/zero of=/tmp/big.jpg bs=1m count=13 2>/dev/null
 curl -sS -o /dev/null -w "upload 13MB       -> %{http_code} (期望 413)\n" \
   -F "file=@/tmp/big.jpg" $NG/api/fitness/assess
+
+# index.html 应同时带 no-cache 与安全头（验证 add_header 继承修复）
+curl -sS -D - -o /dev/null "$NG/index.html" | grep -iE "cache-control|x-frame-options|x-content-type"
 
 # 配置语法
 docker compose -f deploy/nginx/docker-compose.verify.yml exec nginx nginx -t
@@ -271,8 +291,11 @@ docker compose -f deploy/nginx/docker-compose.verify.yml down
 | 刷新深链 `/assessment/123` | 200（HTML，SPA fallback） |
 | `/healthz` | 200 `{"status":"ok"}` |
 | `/api/exercises/` | JSON（被反代到后端，非 HTML） |
+| `GET /admin/login` | 200 `text/html`，带后端标记 `<!-- admin -->` / `X-Mock: admin`（**非** Flutter index.html） |
+| `POST /admin/membership/{id}/revoke` | 200（表单 POST 透传后端，非静态区 405） |
 | `/media/exercises/images/...` | 200（素材可达） |
 | 上传 13MB | 413（Nginx 层拦截，与后端 10MB 上限对齐） |
+| `/index.html` 响应头 | 同时有 `Cache-Control: no-cache` 与 `X-Frame-Options`/`X-Content-Type-Options`（安全头未被 add_header 继承丢弃） |
 | HTTP→HTTPS | 301（生产；本地 verify 为明文 HTTP，不验证跳转） |
 
 > HTTP→HTTPS 跳转与 HSTS 依赖证书，本地 verify compose 只验路由与反代；跳转逻辑可在
@@ -281,9 +304,9 @@ docker compose -f deploy/nginx/docker-compose.verify.yml down
 ### compose 片段（`deploy/nginx/docker-compose.verify.yml`）
 
 该文件**仅用于本地验证**，不要用于生产：它用 stdlib mock 后端
-（`deploy/nginx/verify/mock_backend.py`，模拟 `/healthz`、`/api`、`/media`、`/static`
-与上传回显）替换真实 FastAPI，无需密钥/数据库/构建后端镜像。生产用 1Panel/独立 Nginx
-加载 `deploy/nginx/formfit-web.conf`。
+（`deploy/nginx/verify/mock_backend.py`，模拟 `/healthz`、`/api`、`/admin`（页面 + 表单
+POST）、`/media`、`/static` 与上传回显）替换真实 FastAPI，无需密钥/数据库/构建后端镜像。
+生产用 1Panel/独立 Nginx 加载 `deploy/nginx/formfit-web.conf`。
 
 ## 8. 发布前人工门禁（W7-1）
 
