@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/repository.dart';
+import '../../core/responsive/breakpoints.dart';
 import '../../models/plan.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/exercise_image.dart';
@@ -19,19 +20,26 @@ class PlanTab extends ConsumerWidget {
     final plans = ref.watch(plansProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('我的计划')),
-      body: RefreshIndicator(
-        onRefresh: () async => ref.invalidate(plansProvider),
-        child: plans.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (e, _) => _error(context, ref, e.toString()),
-          data: (list) {
-            if (list.isEmpty) return _empty(context);
-            return ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: list.length,
-              itemBuilder: (_, i) => _PlanCard(plan: list[i]),
-            );
-          },
+      body: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: context.formFactor.contentMaxWidth,
+          ),
+          child: RefreshIndicator(
+            onRefresh: () async => ref.invalidate(plansProvider),
+            child: plans.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => _error(context, ref, e.toString()),
+              data: (list) {
+                if (list.isEmpty) return _empty(context);
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: list.length,
+                  itemBuilder: (_, i) => _PlanCard(plan: list[i]),
+                );
+              },
+            ),
+          ),
         ),
       ),
     );

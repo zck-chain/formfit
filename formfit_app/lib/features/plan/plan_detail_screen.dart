@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/responsive/breakpoints.dart';
 import '../../models/plan.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/exercise_image.dart';
@@ -33,26 +34,34 @@ class PlanDayScreen extends ConsumerWidget {
             return const Center(child: Text('该训练日不存在'));
           }
           final day = days[dayIndex];
-          return Column(
-            children: [
-              Expanded(
-                child: day.items.isEmpty
-                    ? const Center(
-                        child: Text('这一天还没有安排动作',
-                            style:
-                                TextStyle(color: AppColors.textSecondary)))
-                    : ListView.separated(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: day.items.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 10),
-                        itemBuilder: (_, i) => _ExerciseTile(
-                          index: i,
-                          item: day.items[i],
-                        ),
-                      ),
+          return Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: context.formFactor.contentMaxWidth,
               ),
-              _startBar(context, day),
-            ],
+              child: Column(
+                children: [
+                  Expanded(
+                    child: day.items.isEmpty
+                        ? const Center(
+                            child: Text('这一天还没有安排动作',
+                                style:
+                                    TextStyle(color: AppColors.textSecondary)))
+                        : ListView.separated(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: day.items.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (_, i) => _ExerciseTile(
+                              index: i,
+                              item: day.items[i],
+                            ),
+                          ),
+                  ),
+                  _startBar(context, day),
+                ],
+              ),
+            ),
           );
         },
       ),

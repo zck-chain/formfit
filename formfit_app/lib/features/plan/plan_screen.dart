@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../api/repository.dart';
+import '../../core/responsive/breakpoints.dart';
 import '../../models/plan.dart';
 import '../paywall/pro_gate.dart';
 import '../../providers/auth_provider.dart';
@@ -96,9 +97,14 @@ class PlanScreen extends ConsumerWidget {
 
   Widget _planView(BuildContext context, Plan plan) {
     final days = plan.content.days;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: context.formFactor.contentMaxWidth,
+        ),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
         // 计划头卡
         Container(
           padding: const EdgeInsets.all(20),
@@ -144,7 +150,9 @@ class PlanScreen extends ConsumerWidget {
           final day = entry.value;
           return _DayCard(dayIndex: i, day: day);
         }),
-      ],
+          ],
+        ),
+      ),
     );
   }
 
