@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../api/repository.dart';
+import '../../core/responsive/breakpoints.dart';
 import '../../models/assessment.dart';
 import '../paywall/pro_gate.dart';
 import '../../providers/auth_provider.dart';
@@ -76,30 +77,38 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('体态评估')),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _introCard(),
-            const SizedBox(height: 20),
-            _imagePicker(),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(_error!,
-                  style: const TextStyle(color: AppColors.danger, fontSize: 13)),
-            ],
-            const SizedBox(height: 20),
-            if (_result != null) _resultCard(_result!),
-            if (_result == null && _image != null && !_analyzing)
-              ElevatedButton.icon(
-                onPressed: _analyze,
-                icon: const Icon(Icons.auto_awesome, color: Colors.black),
-                label: const Text('开始 AI 评估',
-                    style: TextStyle(color: Colors.black)),
-              ),
-            if (_analyzing) _analyzingCard(),
-          ],
+      body: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: context.formFactor.contentMaxWidth,
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _introCard(),
+                const SizedBox(height: 20),
+                _imagePicker(),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(_error!,
+                      style: const TextStyle(
+                          color: AppColors.danger, fontSize: 13)),
+                ],
+                const SizedBox(height: 20),
+                if (_result != null) _resultCard(_result!),
+                if (_result == null && _image != null && !_analyzing)
+                  ElevatedButton.icon(
+                    onPressed: _analyze,
+                    icon: const Icon(Icons.auto_awesome, color: Colors.black),
+                    label: const Text('开始 AI 评估',
+                        style: TextStyle(color: Colors.black)),
+                  ),
+                if (_analyzing) _analyzingCard(),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -148,10 +157,17 @@ class _AssessmentScreenState extends ConsumerState<AssessmentScreen> {
   }
 
   Widget _imagePicker() {
+    // 手机固定 280；平板/桌面按比例加高但封顶，图片用 BoxFit.cover 不变形。
+    final factor = context.formFactor;
+    final pickerHeight = factor.isPhone
+        ? 280.0
+        : factor.isTablet
+            ? 340.0
+            : Breakpoints.assessmentImageMaxHeight;
     return GestureDetector(
       onTap: _analyzing ? null : () => _showSourceSheet(),
       child: Container(
-        height: 280,
+        height: pickerHeight,
         decoration: BoxDecoration(
           color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(AppRadius.lg),

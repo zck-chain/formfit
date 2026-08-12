@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/responsive/breakpoints.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/membership_provider.dart';
 import '../../theme/app_theme.dart';
@@ -20,9 +21,14 @@ class ProfileTab extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('我的')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
+      body: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: context.formFactor.contentMaxWidth,
+          ),
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
           // 用户卡
           Container(
             padding: const EdgeInsets.all(18),
@@ -131,6 +137,8 @@ class ProfileTab extends ConsumerWidget {
             ),
           ),
         ],
+          ),
+        ),
       ),
     );
   }
