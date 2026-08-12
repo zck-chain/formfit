@@ -1,12 +1,12 @@
 {
-    "name": "formfit_app",
-    "short_name": "formfit_app",
+    "name": "FormFit · AI 健身私教",
+    "short_name": "FormFit",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#0E0E12",
+    "theme_color": "#0E0E12",
+    "description": "FormFit —— 你的 AI 健身私教：体态评估、专属训练计划与跟练记录。",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
