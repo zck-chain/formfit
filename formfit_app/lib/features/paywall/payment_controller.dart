@@ -107,9 +107,23 @@ String paymentChannelLabel(String channel) => switch (channel) {
       _ => channel,
 };
 
+/// v1 自助下单开关（构建期平台判定）。
+///
+/// Web 构建下后端以 `CHECKOUT_ENABLED=false` 硬关闭真实下单（`POST
+/// /api/payment/orders` 返回 403 `checkout_disabled`），前端据此不渲染真实
+/// 下单 CTA 与「恢复购买」入口，只展示「暂未开放/联系管理员」；native
+/// （iOS/macOS）走 Apple 内购/沙箱的现有路径保持不变。
+///
+/// 抽成可覆盖的 provider 是为了在 VM 单测里覆盖 Web 分支（[kIsWeb] 是
+/// 编译期常量，运行时无法切换），与 `AuthInterceptor.isWeb` 同一思路。
+final selfServiceCheckoutEnabledProvider = Provider<bool>((ref) => !kIsWeb);
+
 class PaymentController extends StateNotifier<PaymentState> {
   PaymentController(this._ref) : super(const PaymentState()) {
-    load();
+    // Web（自助下单关闭）不渲染任何下单入口，无需拉取套餐/渠道。
+    if (_ref.read(selfServiceCheckoutEnabledProvider)) {
+      load();
+    }
   }
   final Ref _ref;
 
