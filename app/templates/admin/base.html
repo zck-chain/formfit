@@ -72,6 +72,9 @@
       <a href="/admin/exercises" class="{{ 'active' if active == 'exercises' else '' }}">
         {{ icon('dumbbell') }} 动作库
       </a>
+      <a href="/admin/audit" class="{{ 'active' if active == 'audit' else '' }}">
+        {{ icon('clock') }} 操作审计
+      </a>
 
       <div class="sidenav-sep"></div>
       <form class="logout-form" method="post" action="/admin/logout">

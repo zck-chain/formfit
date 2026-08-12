@@ -12,6 +12,7 @@ from app.core.config import BASE_DIR, settings
 from app.core.security import verify_password
 from app.db.session import get_db
 from app.models import Exercise, Membership, Plan, User
+from app.models.admin_audit import ADMIN_ACTIONS
 from app.services import admin_audit, admin_service, exercise_service as svc
 
 router = APIRouter(tags=["admin"])
@@ -56,6 +57,27 @@ def require_admin(request: Request, db: Session) -> User:
     if not user:
         raise HTTPException(status_code=303, headers={"Location": "/admin/login"})
     return user
+
+
+def require_admin_html(request: Request, db: Session) -> User:
+    """后台页面鉴权：
+
+    - 持有有效 admin session 且为管理员 → 返回该用户。
+    - 携带合法签名的 session cookie 但不是管理员（普通用户/已停用/版本不匹配）→ 403。
+    - 未登录或 cookie 无效/过期 → 303 跳转登录页。
+
+    与所有后台页共用的 ``require_admin`` 相比，本方法把「已登录但越权」与
+    「未登录」区分开：审计页等敏感页面需要对越权访问显式返回 403，而不是
+    静默重定向到登录页。
+    """
+    user = _current_admin(request, db)
+    if user:
+        return user
+    payload = read_session_payload(request.cookies.get(COOKIE_NAME))
+    if payload:
+        # 合法签名会话，但身份不满足管理员 → 越权
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    raise HTTPException(status_code=303, headers={"Location": "/admin/login"})
 
 
 @router.get("/admin/login", response_class=HTMLResponse)
@@ -442,5 +464,102 @@ def exercise_detail(
         {
             "admin": admin, "active": "exercises", "user_count": _user_count(db),
             "ex": ex,
+        },
+    )
+
+
+# ---------- 操作审计 ----------
+def _parse_dt(value: str | None, *, end_of_day: bool = False) -> datetime | None:
+    """解析查询参数中的时间。
+
+    支持完整 ISO（``2026-08-12T08:00:00``）或仅日期 ``2026-08-12``；
+    仅日期时，start 取当日 00:00，end 取当日 23:59:59，便于按天筛选。
+    解析失败抛 400。naive 时间视为 UTC。
+    """
+    if not value:
+        return None
+    try:
+        if "T" in value or " " in value:
+            dt = datetime.fromisoformat(value)
+        else:
+            d = datetime.strptime(value, "%Y-%m-%d")
+            if end_of_day:
+                dt = d.replace(hour=23, minute=59, second=59, microsecond=999999)
+            else:
+                dt = d
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail=f"无法解析时间参数: {value}")
+
+
+@router.get("/admin/audit", response_class=HTMLResponse)
+def audit_page(
+    request: Request,
+    action: str | None = None,
+    admin_id: int | None = None,
+    target_user_id: int | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    db: Session = Depends(get_db),
+):
+    """管理员操作审计查看页：分页 + action/操作者/目标/时间范围过滤。
+
+    只读，不改变任何业务状态；序列化走白名单（admin_audit.serialize_event），
+    不输出密码哈希/密钥/Cookie/Authorization。
+    """
+    admin = require_admin_html(request, db)
+
+    if action and action not in ADMIN_ACTIONS:
+        raise HTTPException(status_code=400, detail="action 取值非法")
+
+    start_dt = _parse_dt(start)
+    end_dt = _parse_dt(end, end_of_day=True)
+    if start_dt and end_dt and start_dt > end_dt:
+        raise HTTPException(status_code=400, detail="start 不能晚于 end")
+
+    page = max(1, page)
+    page_size = max(1, min(page_size, 100))
+
+    items, total = admin_audit.list_events(
+        db,
+        action=action,
+        admin_id=admin_id,
+        target_user_id=target_user_id,
+        start=start_dt,
+        end=end_dt,
+        page=page,
+        page_size=page_size,
+    )
+    total_pages = (total + page_size - 1) // page_size
+
+    # 保留当前过滤条件到分页/翻页链接
+    query = {
+        "action": action or "",
+        "admin_id": admin_id or "",
+        "target_user_id": target_user_id or "",
+        "start": start or "",
+        "end": end or "",
+        "page_size": page_size,
+    }
+
+    return templates.TemplateResponse(
+        request,
+        "admin/audit.html",
+        {
+            "admin": admin,
+            "active": "audit",
+            "user_count": _user_count(db),
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "actions": ADMIN_ACTIONS,
+            "action_labels": admin_audit.ACTION_ZH,
+            "query": query,
         },
     )

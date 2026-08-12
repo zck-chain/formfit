@@ -1,0 +1,118 @@
+{% extends "admin/base.html" %}
+{% from "admin/base.html" import icon %}
+{% block title %}操作审计 · FormFit{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">{{ icon('clock') }} 操作审计</h1>
+    <div class="page-sub">管理员发放/收回会员、启停用户的留痕记录（只读）</div>
+  </div>
+  <span class="tag tag-ok">共 {{ total }} 条</span>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <div class="panel-title">筛选 <span class="hint">按动作 / 操作者 / 目标用户 / 时间范围</span></div>
+  </div>
+  <div class="panel-body">
+    <form method="get" action="/admin/audit" class="form-inline" style="flex-wrap:wrap;gap:10px;">
+      <select name="action" class="btn-sm">
+        <option value="">全部动作</option>
+        {% for a in actions %}
+        <option value="{{ a }}" {{ 'selected' if query.action == a }}>{{ action_labels.get(a, a) }}</option>
+        {% endfor %}
+      </select>
+      <input type="number" name="admin_id" class="btn-sm" placeholder="操作者 ID" value="{{ query.admin_id }}" style="width:110px;">
+      <input type="number" name="target_user_id" class="btn-sm" placeholder="目标用户 ID" value="{{ query.target_user_id }}" style="width:120px;">
+      <input type="date" name="start" class="btn-sm" value="{{ query.start[:10] if query.start else '' }}" title="开始日期">
+      <span class="muted">至</span>
+      <input type="date" name="end" class="btn-sm" value="{{ query.end[:10] if query.end else '' }}" title="结束日期">
+      <input type="hidden" name="page_size" value="{{ query.page_size }}">
+      <button type="submit" class="btn-sm">{{ icon('search') }} 查询</button>
+      <a href="/admin/audit" class="btn-sm" style="text-decoration:none;">重置</a>
+    </form>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    {% if items %}
+    <table>
+      <thead>
+        <tr>
+          <th class="num">时间</th>
+          <th>动作</th>
+          <th>操作者</th>
+          <th>目标用户</th>
+          <th>事由</th>
+          <th>改动前 / 后</th>
+          <th>request_id</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in items %}
+        <tr>
+          <td class="num mono" style="white-space:nowrap;">{{ e.created_at[:19].replace('T',' ') if e.created_at else '—' }}</td>
+          <td>
+            <span class="tag {% if e.action == 'grant_membership' %}tag-ok{% elif e.action == 'revoke_membership' %}tag-danger{% else %}tag-warn{% endif %}">
+              {{ e.action_label }}
+            </span>
+          </td>
+          <td>
+            <div>{{ e.admin_email or '—' }}</div>
+            <div class="muted" style="font-size:11px;">ID {{ e.admin_id }}</div>
+          </td>
+          <td>
+            <div>{{ e.target_email or '—' }}</div>
+            <div class="muted" style="font-size:11px;">ID {{ e.target_user_id }}</div>
+          </td>
+          <td>{{ e.reason or '—' }}</td>
+          <td>
+            <details>
+              <summary class="muted" style="cursor:pointer;font-size:11px;">查看快照</summary>
+              <div style="display:flex;gap:12px;margin-top:6px;flex-wrap:wrap;">
+                <div>
+                  <div class="muted" style="font-size:10px;">BEFORE</div>
+                  <pre class="mono" style="margin:4px 0 0;font-size:11px;background:rgba(0,0,0,.04);padding:6px;border-radius:4px;white-space:pre-wrap;max-width:240px;">{{ e.before | tojson(indent=2) }}</pre>
+                </div>
+                <div>
+                  <div class="muted" style="font-size:10px;">AFTER</div>
+                  <pre class="mono" style="margin:4px 0 0;font-size:11px;background:rgba(0,0,0,.04);padding:6px;border-radius:4px;white-space:pre-wrap;max-width:240px;">{{ e.after | tojson(indent=2) }}</pre>
+                </div>
+              </div>
+            </details>
+          </td>
+          <td class="mono muted" style="font-size:10px;word-break:break-all;max-width:140px;">{{ e.request_id or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {# 分页：保留当前过滤条件 #}
+    {% set qs = '&action=' ~ query.action ~ '&admin_id=' ~ query.admin_id ~ '&target_user_id=' ~ query.target_user_id ~ '&start=' ~ query.start ~ '&end=' ~ query.end ~ '&page_size=' ~ query.page_size %}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;">
+      <span class="muted" style="font-size:12px;">
+        第 {{ page }} / {{ total_pages }} 页，共 {{ total }} 条
+      </span>
+      <div style="display:flex;gap:8px;">
+        {% if page > 1 %}
+        <a class="btn-sm" href="?page={{ page - 1 }}{{ qs }}" style="text-decoration:none;">上一页</a>
+        {% else %}
+        <span class="btn-sm muted" style="opacity:.5;">上一页</span>
+        {% endif %}
+        {% if page < total_pages %}
+        <a class="btn-sm" href="?page={{ page + 1 }}{{ qs }}" style="text-decoration:none;">下一页</a>
+        {% else %}
+        <span class="btn-sm muted" style="opacity:.5;">下一页</span>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <div class="empty" style="padding:32px;text-align:center;">
+      {{ icon('inbox') }}
+      <div style="margin-top:8px;">暂无审计记录</div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
