@@ -19,6 +19,20 @@ def _reset_rate_limiter():
     limiter.reset()
 
 
+@pytest.fixture(autouse=True)
+def _enable_checkout_in_tests(monkeypatch):
+    """测试默认开启下单（沙箱下单流程需要）。
+
+    生产默认 CHECKOUT_ENABLED=false（kill switch）；测试套件需要验证完整沙箱下单链路，
+    因此在测试环境默认打开。验证「关闭」路径的用例自行 monkeypatch
+    app.api.routes.payment.settings.checkout_enabled = False。
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "checkout_enabled", True, raising=False)
+    yield
+
+
 @pytest.fixture()
 def db_engine():
     engine = create_engine(
