@@ -64,6 +64,11 @@ def create_order(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    # Kill Switch：v1 免费自用版硬关闭真实下单。关闭时对任意 channel 一律拒绝，
+    # 必须在调用 provider / 创建 Order / 生成支付凭证之前拦截，且不产生任何副作用。
+    # 只读接口（套餐目录、会员状态）不受影响，供前端展示「暂未开放」。
+    if not settings.checkout_enabled:
+        raise HTTPException(status_code=403, detail={"error": "checkout_disabled"})
     try:
         order = payment_service.create_order(db, user, body.plan_code, body.channel)
         credential = payment_service.build_pay_credential(order)

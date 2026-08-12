@@ -110,6 +110,12 @@ class Settings(BaseSettings):
     payment_channels: str = "sandbox"
     payment_callback_base_url: str = "http://127.0.0.1:8000"
 
+    # 下单 Kill Switch：v1 为免费自用版，默认硬关闭真实下单。
+    # 关闭时 POST /api/payment/orders 直接返回 403 checkout_disabled，不进 provider、
+    # 不建 Order、不产生支付凭证；只读接口（套餐目录、会员状态）仍可用。
+    # 这是运行时配置级开关，线上紧急关闭只需改环境变量无需发版。
+    checkout_enabled: bool = False
+
     # 沙箱渠道（本地/联调，无需真实密钥）
     sandbox_secret: str = "sandbox-dev-secret"
 
@@ -271,6 +277,13 @@ def validate_deployment_settings(settings: Settings) -> None:
     if problems:
         raise RuntimeError(
             "生产环境部署校验失败，拒绝启动：\n  - " + "\n  - ".join(problems)
+        )
+
+    # 下单 Kill Switch：v1 免费自用版生产默认应为关闭。此处仅告警不阻断，
+    # 以便将来商业化时无需改代码即可打开；但打开必须是显式、有意识的运维决策。
+    if settings.checkout_enabled:
+        logger.warning(
+            "生产环境 CHECKOUT_ENABLED=true：真实下单已开启，请确认支付渠道与结算流程就绪"
         )
 
 
