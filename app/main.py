@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
@@ -40,6 +42,9 @@ app = FastAPI(
 # 限流：注册到 app，各路由用 @limiter.limit(...) 声明阈值
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
+
+# 介绍作品页（落地页）模板，与后台 Jinja2 模板目录同源。
+templates = Jinja2Templates(directory=str(BASE_DIR / "app" / "templates"))
 
 
 @app.middleware("http")
@@ -161,8 +166,26 @@ if _dataset_videos.exists():
     )
 
 
-@app.get("/")
-def root():
+@app.get("/", response_class=HTMLResponse)
+def landing(request: Request):
+    """公开介绍作品页（落地页）：产品亮点、动作库展示、下载与联系方式。
+
+    下载链接与联系方式由运行时配置注入，未配置时按钮显示「即将开放」。
+    """
+    return templates.TemplateResponse(
+        request,
+        "landing.html",
+        {
+            "android_download_url": settings.landing_android_download_url,
+            "contact_email": settings.landing_contact_email,
+            "contact_wechat": settings.landing_contact_wechat,
+        },
+    )
+
+
+@app.get("/api")
+def api_index():
+    # 接口发现入口（原根路径 JSON 信息迁移至此，供联调/探活参考）。
     return {
         "app": settings.app_name,
         "status": "running",
