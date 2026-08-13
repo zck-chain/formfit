@@ -101,6 +101,12 @@ class Settings(BaseSettings):
     app_name: str = "FormFit"
     upload_dir: Path = UPLOAD_DIR
 
+    # ---- 介绍作品页（落地页 /）展示配置 ----
+    # 留空时下载按钮显示「即将开放」，二维码显示占位。上线前通过环境变量配置真实值。
+    landing_android_download_url: str = ""
+    landing_contact_email: str = "hello@formfit.app"
+    landing_contact_wechat: str = "FormFit-CN"
+
     # ---- 限流（应用层兜底，单位：次/时间窗口）----
     # 格式 "N/period"，period 如 second/minute/hour/day。
     # 是否部署在可信反向代理之后：仅当为 true 时才采信 X-Forwarded-For
